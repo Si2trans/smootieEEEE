@@ -35,6 +35,7 @@ import {
   deleteRecipe,
   fetchAppData,
   fileToImagePayload,
+  cacheAppData,
   getCachedAppData,
   saveIngredient,
   saveRecipe,
@@ -132,6 +133,17 @@ function App() {
     return data;
   }
 
+  function applyRecipeLocally(recipe: Recipe) {
+    setRecipes((current) => {
+      const next = current.some((item) => item.id === recipe.id)
+        ? current.map((item) => (item.id === recipe.id ? recipe : item))
+        : [recipe, ...current];
+      cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: next });
+      return next;
+    });
+    setSelectedRecipe(recipe);
+  }
+
   function openRecipe(recipe: Recipe) {
     setSelectedRecipe(recipe);
     if (pickingCostRecipe) {
@@ -214,12 +226,12 @@ function App() {
           note: itemNotes[index] || ""
         }))
         .filter((item) => item.ingredientId && item.amount > 0);
-      await saveRecipe({
+      const savedRecipe: Recipe = {
         id: recipeId,
         name: String(form.get("name") || "สูตรใหม่"),
         categoryId: String(form.get("categoryId") || "tea") as CategoryId,
+        imageKey: editingRecipe?.imageKey || "thai",
         imageUrl,
-        imageFileId,
         status: String(form.get("status") || ""),
         prepTime: editingRecipe?.prepTime || 0,
         sweetness: editingRecipe?.sweetness || 0,
@@ -227,13 +239,15 @@ function App() {
         sellingPrice: Number(form.get("sellingPrice") || 35),
         favorite: editingRecipe?.favorite || false,
         rating: editingRecipe?.rating || 4.5,
+        items,
         steps: String(form.get("steps") || "")
           .split("\n")
           .map((step) => step.trim())
-          .filter(Boolean),
-        items
-      });
-      await refreshData(recipeId);
+          .filter(Boolean)
+      };
+      await saveRecipe({ ...savedRecipe, imageFileId });
+      applyRecipeLocally(savedRecipe);
+      await refreshData(recipeId).catch(() => undefined);
       setEditingRecipe(null);
       setScreen("detail");
     } catch (error) {

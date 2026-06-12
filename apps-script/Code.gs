@@ -236,7 +236,7 @@ function saveRecipe(payload) {
       saveObject(SHEETS.recipeItems, item);
     });
   }
-  return { ok: true, recipe: saved };
+  return { ok: true, recipe: saved.item || recipe, mode: saved.mode || "saved" };
 }
 
 function deleteRecipe(recipeId) {
