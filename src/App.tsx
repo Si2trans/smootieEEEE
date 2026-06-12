@@ -7,7 +7,6 @@ import {
   CupSoda,
   GlassWater,
   Grid2X2,
-  Heart,
   Home,
   Milk,
   Package,
@@ -38,13 +37,12 @@ import {
   getCachedAppData,
   saveIngredient,
   saveRecipe,
-  toggleFavoriteRemote,
   uploadRecipeImage
 } from "./lib/appsScriptApi";
 import { calculateCost, money, roundPrice } from "./lib/cost";
 import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "./types/app";
 
-type Tab = "home" | "recipes" | "cost" | "ingredients" | "favorites";
+type Tab = "home" | "recipes" | "cost" | "ingredients";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
 type IngredientFilter = "all" | "base" | "topping";
 type SortMode = "latest" | "name" | "cost";
@@ -70,7 +68,6 @@ function App() {
   const [targetMargin, setTargetMargin] = useState(60);
   const [deliveryFee, setDeliveryFee] = useState(30);
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
-  const [favoriteEditMode, setFavoriteEditMode] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(cachedData?.recipes[0] || mockRecipes[0]);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || mockCategories);
   const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || mockRecipes);
@@ -108,16 +105,14 @@ function App() {
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);
-    const visible = tab === "favorites" ? base.filter((recipe) => recipe.favorite) : base;
-    return visible.slice().sort((a, b) => {
+    return base.slice().sort((a, b) => {
       if (sortMode === "name") return a.name.localeCompare(b.name, "th");
       if (sortMode === "cost") return calculateCost(b, ingredientList).totalCost - calculateCost(a, ingredientList).totalCost;
       return 0;
     });
-  }, [ingredientList, recipes, selectedCategory, sortMode, tab]);
+  }, [ingredientList, recipes, selectedCategory, sortMode]);
 
   const selectedCost = calculateCost(selectedRecipe, ingredientList);
-  const favoriteRecipes = recipes.filter((recipe) => recipe.favorite);
 
   function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[] }, selectedId?: string) {
     setCategoryList(data.categories);
@@ -152,20 +147,6 @@ function App() {
       return;
     }
     setScreen("detail");
-  }
-
-  async function toggleFavorite(recipeId: string) {
-    const current = recipes.find((item) => item.id === recipeId);
-    const nextFavorite = !(current?.favorite ?? selectedRecipe.favorite);
-    setRecipes((items) => items.map((item) => (item.id === recipeId ? { ...item, favorite: nextFavorite } : item)));
-    if (selectedRecipe.id === recipeId) setSelectedRecipe((recipe) => ({ ...recipe, favorite: nextFavorite }));
-    try {
-      await toggleFavoriteRemote(recipeId, nextFavorite);
-      await refreshData(recipeId);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "บันทึกเมนูโปรดไม่สำเร็จ");
-      await refreshData(recipeId).catch(() => undefined);
-    }
   }
 
   async function submitIngredient(event: FormEvent<HTMLFormElement>) {
@@ -322,7 +303,6 @@ function App() {
             onBack={() => setScreen("main")}
             onDelete={removeRecipe}
             onEdit={startEditRecipe}
-            onFavorite={toggleFavorite}
           />
         ) : screen === "ingredientForm" ? (
           <IngredientForm
@@ -351,7 +331,7 @@ function App() {
               ) : tab === "home" ? (
                 <HomeScreen
                   categories={categoryList}
-                  favoriteRecipes={favoriteRecipes}
+                  recipes={recipes}
                   onCategory={(category) => {
                     setSelectedCategory(category);
                     setTab("recipes");
@@ -386,7 +366,7 @@ function App() {
                   onDeliveryFee={setDeliveryFee}
                   onMargin={setTargetMargin}
                 />
-              ) : tab === "ingredients" ? (
+              ) : (
                 <IngredientsScreen
                   filter={ingredientFilter}
                   ingredients={ingredientList}
@@ -395,15 +375,6 @@ function App() {
                   onDelete={removeIngredient}
                   onEdit={startEditIngredient}
                   onFilter={setIngredientFilter}
-                />
-              ) : (
-                <FavoritesScreen
-                  editMode={favoriteEditMode}
-                  ingredients={ingredientList}
-                  recipes={favoriteRecipes}
-                  onFavorite={toggleFavorite}
-                  onOpen={openRecipe}
-                  onToggleEdit={() => setFavoriteEditMode((value) => !value)}
                 />
               )}
             </main>
@@ -417,13 +388,13 @@ function App() {
 
 function HomeScreen({
   categories,
-  favoriteRecipes,
+  recipes,
   onCategory,
   onOpen,
   onNavigate
 }: {
   categories: Category[];
-  favoriteRecipes: Recipe[];
+  recipes: Recipe[];
   onCategory: (category: CategoryId) => void;
   onOpen: (recipe: Recipe) => void;
   onNavigate: (tab: Tab) => void;
@@ -476,9 +447,9 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle action="ดูทั้งหมด" title="เมนูขายดีประจำวัน" onAction={() => onNavigate("favorites")} />
+      <SectionTitle action="ดูทั้งหมด" title="เมนูขายดีประจำวัน" onAction={() => onNavigate("recipes")} />
       <div className="horizontal-cards">
-        {favoriteRecipes.map((recipe) => (
+        {recipes.slice(0, 8).map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
             <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
             <strong>{recipe.name}</strong>
@@ -559,8 +530,7 @@ function RecipeDetail({
   saving,
   onBack,
   onDelete,
-  onEdit,
-  onFavorite
+  onEdit
 }: {
   recipe: Recipe;
   ingredients: Ingredient[];
@@ -568,7 +538,6 @@ function RecipeDetail({
   onBack: () => void;
   onDelete: (id: string) => void;
   onEdit: (recipe: Recipe) => void;
-  onFavorite: (id: string) => void;
 }) {
   const cost = calculateCost(recipe, ingredients);
   const byId = new Map(ingredients.map((item) => [item.id, item]));
@@ -579,9 +548,7 @@ function RecipeDetail({
           <ChevronLeft size={24} />
         </button>
         <strong>{recipe.name}</strong>
-        <button onClick={() => onFavorite(recipe.id)} type="button">
-          <Heart className={recipe.favorite ? "is-favorite" : ""} fill={recipe.favorite ? "currentColor" : "none"} size={22} />
-        </button>
+        <span />
       </div>
       <div className="detail-tools">
         <button onClick={() => onEdit(recipe)} type="button">
@@ -826,43 +793,6 @@ function IngredientsScreen({
   );
 }
 
-function FavoritesScreen({
-  editMode,
-  recipes,
-  ingredients,
-  onFavorite,
-  onOpen,
-  onToggleEdit
-}: {
-  editMode: boolean;
-  recipes: Recipe[];
-  ingredients: Ingredient[];
-  onFavorite: (id: string) => void;
-  onOpen: (recipe: Recipe) => void;
-  onToggleEdit: () => void;
-}) {
-  return (
-    <>
-      <TopTitle right={<button className="text-button" onClick={onToggleEdit} type="button">{editMode ? "เสร็จ" : "แก้ไข"}</button>} title="เมนูโปรด" />
-      <div className="favorite-list">
-        {recipes.map((recipe) => {
-          const cost = calculateCost(recipe, ingredients);
-          return (
-            <button className="favorite-row" key={recipe.id} onClick={() => (editMode ? onFavorite(recipe.id) : onOpen(recipe))} type="button">
-              <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
-              <div>
-                <strong>{recipe.name}</strong>
-                <span>ต้นทุน {money(cost.totalCost)} บาท · กำไร {money(cost.profit)} บาท</span>
-              </div>
-              <Heart className={editMode ? "favorite-remove" : "is-favorite"} fill="currentColor" size={20} />
-            </button>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
 function IngredientForm({
   ingredient,
   message,
@@ -1097,8 +1027,7 @@ function BottomNav({ active, onChange, onAdd }: { active: Tab; onChange: (tab: T
     { id: "home", label: "หน้าแรก", icon: Home },
     { id: "recipes", label: "สูตร", icon: Grid2X2 },
     { id: "cost", label: "ต้นทุน", icon: ShoppingBag },
-    { id: "ingredients", label: "วัตถุดิบ", icon: WalletCards },
-    { id: "favorites", label: "โปรด", icon: Heart }
+    { id: "ingredients", label: "วัตถุดิบ", icon: WalletCards }
   ];
   return (
     <nav className="bottom-nav">
