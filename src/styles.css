@@ -783,6 +783,7 @@ p {
 
 .detail-section,
 .cost-card,
+.delivery-card,
 .pricing-card,
 .selected-recipe,
 .form-card,
@@ -800,6 +801,7 @@ p {
 
 .detail-section h3,
 .cost-card h3,
+.delivery-card h3,
 .pricing-card h3 {
   font-size: 15px;
   margin-bottom: 10px;
@@ -992,6 +994,65 @@ p {
 
 .pricing-card {
   padding: 14px;
+}
+
+.delivery-card {
+  padding: 14px;
+}
+
+.platform-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.platform-row button {
+  min-height: 86px;
+  border: 1px solid #edf0ea;
+  border-radius: 13px;
+  background: #f7f9f5;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 4px;
+  color: #394331;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.platform-row button.is-active {
+  border-color: rgba(52, 125, 19, 0.38);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.platform-row img {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.platform-row strong {
+  font-size: 12px;
+}
+
+.fee-input {
+  display: grid;
+  gap: 6px;
+  color: #56604f;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.fee-input input {
+  width: 100%;
+  border: 1px solid #e1e6dd;
+  border-radius: 10px;
+  min-height: 38px;
+  padding: 8px 11px;
+  color: #17210f;
 }
 
 .margin-row {

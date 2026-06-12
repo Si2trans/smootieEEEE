@@ -53,6 +53,11 @@ type CostMode = "formula" | "price" | "profit";
 const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
 const units: Unit[] = ["ml", "g", "piece"];
+const deliveryPlatforms = [
+  { id: "lineman", name: "LINE MAN", fee: 30, icon: "/platform-lineman.svg" },
+  { id: "grab", name: "Grab", fee: 32, icon: "/platform-grab.svg" },
+  { id: "shopeefood", name: "ShopeeFood", fee: 30, icon: "/platform-shopeefood.svg" }
+];
 
 function App() {
   const [cachedData] = useState(() => getCachedAppData());
@@ -63,6 +68,8 @@ function App() {
   const [ingredientFilter, setIngredientFilter] = useState<IngredientFilter>("all");
   const [costMode, setCostMode] = useState<CostMode>("formula");
   const [targetMargin, setTargetMargin] = useState(60);
+  const [deliveryFee, setDeliveryFee] = useState(30);
+  const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [favoriteEditMode, setFavoriteEditMode] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(cachedData?.recipes[0] || mockRecipes[0]);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || mockCategories);
@@ -127,6 +134,12 @@ function App() {
 
   function openRecipe(recipe: Recipe) {
     setSelectedRecipe(recipe);
+    if (pickingCostRecipe) {
+      setPickingCostRecipe(false);
+      setTab("cost");
+      setScreen("main");
+      return;
+    }
     setScreen("detail");
   }
 
@@ -321,6 +334,7 @@ function App() {
               ) : tab === "recipes" ? (
                 <RecipesScreen
                   categories={categoryList}
+                  pickingCostRecipe={pickingCostRecipe}
                   recipes={filteredRecipes}
                   sortMode={sortMode}
                   selectedCategory={selectedCategory}
@@ -332,11 +346,16 @@ function App() {
                 <CostScreen
                   cost={selectedCost}
                   costMode={costMode}
+                  deliveryFee={deliveryFee}
                   ingredients={ingredientList}
                   recipe={selectedRecipe}
                   targetMargin={targetMargin}
                   onChangeMode={setCostMode}
-                  onChangeRecipe={() => setTab("recipes")}
+                  onChangeRecipe={() => {
+                    setPickingCostRecipe(true);
+                    setTab("recipes");
+                  }}
+                  onDeliveryFee={setDeliveryFee}
                   onMargin={setTargetMargin}
                 />
               ) : tab === "ingredients" ? (
@@ -459,6 +478,7 @@ function LoadingScreen() {
 
 function RecipesScreen({
   categories,
+  pickingCostRecipe,
   selectedCategory,
   onCategory,
   recipes,
@@ -467,6 +487,7 @@ function RecipesScreen({
   onSort
 }: {
   categories: Category[];
+  pickingCostRecipe: boolean;
   selectedCategory: CategoryId;
   onCategory: (category: CategoryId) => void;
   recipes: Recipe[];
@@ -477,7 +498,8 @@ function RecipesScreen({
   const sortLabel = sortMode === "latest" ? "ล่าสุด" : sortMode === "name" ? "ชื่อเมนู" : "ต้นทุนสูง";
   return (
     <>
-      <TopTitle right={<Search size={22} />} title="สูตร" />
+      <TopTitle right={<Search size={22} />} title={pickingCostRecipe ? "เลือกเมนูคำนวณ" : "สูตร"} />
+      {pickingCostRecipe ? <div className="status-banner">แตะสูตรที่ต้องการ แล้วแอปจะกลับไปหน้าคำนวณต้นทุน</div> : null}
       <div className="category-filter">
         {categories.map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
@@ -592,21 +614,28 @@ function CostScreen({
   recipe,
   cost,
   costMode,
+  deliveryFee,
   targetMargin,
   onChangeMode,
   onChangeRecipe,
+  onDeliveryFee,
   onMargin
 }: {
   recipe: Recipe;
   ingredients: Ingredient[];
   cost: ReturnType<typeof calculateCost>;
   costMode: CostMode;
+  deliveryFee: number;
   targetMargin: number;
   onChangeMode: (mode: CostMode) => void;
   onChangeRecipe: () => void;
+  onDeliveryFee: (fee: number) => void;
   onMargin: (margin: number) => void;
 }) {
   const suggested = roundPrice(cost.totalCost / (1 - targetMargin / 100));
+  const platformFeeAmount = (recipe.sellingPrice * deliveryFee) / 100;
+  const deliveryProfit = recipe.sellingPrice - platformFeeAmount - cost.totalCost;
+  const deliveryMargin = recipe.sellingPrice > 0 ? (deliveryProfit / recipe.sellingPrice) * 100 : 0;
   return (
     <>
       <TopTitle title="คำนวณต้นทุน" />
@@ -640,16 +669,54 @@ function CostScreen({
         </section>
       ) : null}
       {costMode === "profit" ? (
-        <section className="profit-panel">
-          <div>
-            <span>กำไรต่อสูตร</span>
-            <strong>{money(cost.profit)} บาท</strong>
-          </div>
-          <div>
-            <span>กำไร</span>
-            <strong>{money(cost.margin)}%</strong>
-          </div>
-        </section>
+        <>
+          <section className="profit-panel">
+            <div>
+              <span>กำไรหน้าร้าน</span>
+              <strong>{money(cost.profit)} บาท</strong>
+            </div>
+            <div>
+              <span>มาร์จินหน้าร้าน</span>
+              <strong>{money(cost.margin)}%</strong>
+            </div>
+          </section>
+          <section className="delivery-card">
+            <h3>หักเปอร์เซ็นต์เดลิเวอรี่</h3>
+            <div className="platform-row">
+              {deliveryPlatforms.map((platform) => (
+                <button
+                  className={deliveryFee === platform.fee ? "is-active" : ""}
+                  key={platform.id}
+                  onClick={() => onDeliveryFee(platform.fee)}
+                  type="button"
+                >
+                  <img alt="" src={platform.icon} />
+                  <span>{platform.name}</span>
+                  <strong>{platform.fee}%</strong>
+                </button>
+              ))}
+            </div>
+            <label className="fee-input">
+              เปอร์เซ็นต์ที่โดนหัก
+              <input
+                min="0"
+                max="80"
+                onChange={(event) => onDeliveryFee(Number(event.currentTarget.value || 0))}
+                type="number"
+                value={deliveryFee}
+              />
+            </label>
+            <CostLine label="ค่าธรรมเนียมแพลตฟอร์ม" value={platformFeeAmount} />
+            <div className="total-line">
+              <span>กำไรหลังหักเดลิเวอรี่</span>
+              <strong>{money(deliveryProfit)} บาท</strong>
+            </div>
+            <div className="price-line">
+              <span>มาร์จินหลังหัก</span>
+              <strong>{money(deliveryMargin)}%</strong>
+            </div>
+          </section>
+        </>
       ) : null}
       {costMode === "price" ? (
         <section className="pricing-card">
