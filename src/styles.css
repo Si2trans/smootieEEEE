@@ -353,6 +353,8 @@ p {
   overflow-x: auto;
   padding-bottom: 6px;
   scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x proximity;
 }
 
 .horizontal-cards::-webkit-scrollbar {
@@ -360,6 +362,7 @@ p {
 }
 
 .mini-card {
+  scroll-snap-align: start;
   min-height: 150px;
   background: #fff;
   border: 1px solid #edf0ea;

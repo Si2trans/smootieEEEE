@@ -409,7 +409,7 @@ function HomeScreen({
   onNavigate: (tab: Tab) => void;
   onSearch: (query: string) => void;
 }) {
-  const homeRecipes = filterRecipes(recipes, searchQuery, categories).slice(0, 8);
+  const homeRecipes = filterRecipes(recipes, searchQuery, categories);
   return (
     <>
       <header className="home-header">
@@ -465,7 +465,7 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle action="ดูทั้งหมด" title={searchQuery.trim() ? "ผลการค้นหา" : "เมนูขายดีประจำวัน"} onAction={() => onNavigate("recipes")} />
+      <SectionTitle action="ดูทั้งหมด" title={searchQuery.trim() ? "ผลการค้นหา" : "เมนูด่วนจี๋"} onAction={() => onNavigate("recipes")} />
       <div className="horizontal-cards">
         {homeRecipes.map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
