@@ -1,4 +1,4 @@
-﻿import {
+import {
   Bell,
   ChevronDown,
   ChevronLeft,
@@ -22,6 +22,7 @@
   WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { ElementType, FormEvent, ReactNode } from "react";
 import cardCostBg from "./assets/UI/card-cost-bg.png";
 import cardRecipesBg from "./assets/UI/card-recipes-bg.png";
 import { DrinkArt } from "./components/DrinkArt";
@@ -44,7 +45,6 @@ function App() {
   const [categoryList, setCategoryList] = useState<Category[]>(mockCategories);
   const [recipes, setRecipes] = useState(initialRecipes);
   const [ingredientList, setIngredientList] = useState(ingredients);
-  const [dataSource, setDataSource] = useState<"loading" | "live" | "fallback">("loading");
 
   useEffect(() => {
     let ignore = false;
@@ -56,11 +56,9 @@ function App() {
         setIngredientList(data.ingredients);
         setRecipes(data.recipes);
         setSelectedRecipe(data.recipes[0] || initialRecipes[0]);
-        setDataSource("live");
       })
       .catch((error) => {
         console.warn(error);
-        if (!ignore) setDataSource("fallback");
       });
 
     return () => {
@@ -86,7 +84,7 @@ function App() {
     if (selectedRecipe.id === recipeId) setSelectedRecipe((recipe) => ({ ...recipe, favorite: !recipe.favorite }));
   }
 
-  function addIngredient(event: React.FormEvent<HTMLFormElement>) {
+  function addIngredient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const buyQty = Number(form.get("buyQty") || 1);
@@ -94,8 +92,8 @@ function App() {
     const costPerUnit = buyQty > 0 ? buyPrice / buyQty : 0;
     const ingredient: Ingredient = {
       id: `ing_${Date.now()}`,
-      name: String(form.get("name") || "à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸šà¹ƒà¸«à¸¡à¹ˆ"),
-      category: String(form.get("category") || "à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸šà¸™à¹‰à¸³"),
+      name: String(form.get("name") || "วัตถุดิบใหม่"),
+      category: String(form.get("category") || "วัตถุดิบน้ำ"),
       buyQty,
       buyUnit: "ml",
       buyPrice,
@@ -108,12 +106,12 @@ function App() {
     setTab("ingredients");
   }
 
-  function addRecipe(event: React.FormEvent<HTMLFormElement>) {
+  function addRecipe(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const recipe: Recipe = {
       id: `rec_${Date.now()}`,
-      name: String(form.get("name") || "à¸ªà¸¹à¸•à¸£à¹ƒà¸«à¸¡à¹ˆ"),
+      name: String(form.get("name") || "สูตรใหม่"),
       categoryId: String(form.get("categoryId") || "tea") as CategoryId,
       imageKey: "thai",
       prepTime: Number(form.get("prepTime") || 5),
@@ -123,7 +121,7 @@ function App() {
       favorite: false,
       rating: 4.5,
       items: [],
-      steps: ["à¹€à¸žà¸´à¹ˆà¸¡à¸ªà¹ˆà¸§à¸™à¸œà¸ªà¸¡à¹à¸¥à¸°à¸§à¸´à¸˜à¸µà¸—à¸³à¹ƒà¸™à¹€à¸§à¸­à¸£à¹Œà¸Šà¸±à¸™à¹€à¸Šà¸·à¹ˆà¸­à¸¡ Google Sheet"]
+      steps: ["เพิ่มส่วนผสมและวิธีทำในเวอร์ชันเชื่อม Google Sheet"]
     };
     setRecipes((items) => [recipe, ...items]);
     setSelectedRecipe(recipe);
@@ -143,7 +141,12 @@ function App() {
           <>
             <main className="content">
               {tab === "home" ? (
-                <HomeScreen categories={categoryList} favoriteRecipes={favoriteRecipes} onOpen={openRecipe} dataSource={dataSource} />
+                <HomeScreen
+                  categories={categoryList}
+                  favoriteRecipes={favoriteRecipes}
+                  onOpen={openRecipe}
+                  onNavigate={setTab}
+                />
               ) : tab === "recipes" ? (
                 <RecipesScreen
                   categories={categoryList}
@@ -172,51 +175,48 @@ function HomeScreen({
   categories,
   favoriteRecipes,
   onOpen,
-  dataSource
+  onNavigate
 }: {
   categories: Category[];
   favoriteRecipes: Recipe[];
   onOpen: (recipe: Recipe) => void;
-  dataSource: "loading" | "live" | "fallback";
+  onNavigate: (tab: Tab) => void;
 }) {
   return (
     <>
       <header className="home-header">
         <div>
-          <h1>à¸ªà¸§à¸±à¸ªà¸”à¸µ! ðŸ‘‹</h1>
-          <p>à¸§à¸±à¸™à¸™à¸µà¹‰à¸‚à¸²à¸¢à¸”à¸µà¹† à¸›à¸±à¸‡à¹† à¸™à¸°!</p>
+          <h1>สวัสดี</h1>
+          <p>วันนี้ขายดี ๆ ปัง ๆ นะ</p>
         </div>
         <Bell size={22} />
       </header>
       <div className="search-row">
         <label className="search-box">
           <Search size={18} />
-          <input placeholder="à¸„à¹‰à¸™à¸«à¸²à¹€à¸¡à¸™à¸¹ à¹€à¸Šà¹ˆà¸™ à¸Šà¸²à¹„à¸—à¸¢, à¹‚à¸à¹‚à¸à¹‰, à¸™à¸¡à¸ªà¸”..." />
+          <input placeholder="ค้นหาเมนู เช่น ชาไทย, โกโก้, นมสด..." />
         </label>
         <button className="icon-button">
           <SlidersHorizontal size={19} />
         </button>
       </div>
-      <div className={`data-source data-source--${dataSource}`}>
-        {dataSource === "live" ? "Google Sheet connected" : dataSource === "loading" ? "Loading Google Sheet..." : "Using offline sample data"}
-      </div>
       <section className="quick-grid">
-        <button className="quick-card quick-card--green" style={{ backgroundImage: `url(${cardRecipesBg})` }}>
+        <button className="quick-card quick-card--green" style={{ backgroundImage: `url(${cardRecipesBg})` }} onClick={() => onNavigate("recipes")}>
           <div>
-            <h3>à¸ªà¸¹à¸•à¸£à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸”à¸·à¹ˆà¸¡</h3>
-            <p>à¸„à¹‰à¸™à¸«à¸²à¸ªà¸¹à¸•à¸£à¹„à¸§ à¹ƒà¸Šà¹‰à¸•à¸­à¸™à¸‚à¸²à¸¢à¸ˆà¸£à¸´à¸‡</p>
-            <span>à¸”à¸¹à¸ªà¸¹à¸•à¸£à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”</span>
+            <h3>สูตรเครื่องดื่ม</h3>
+            <p>ค้นหาสูตรไว ใช้ตอนขายจริง</p>
+            <span>ดูสูตรทั้งหมด</span>
           </div>
         </button>
-        <button className="quick-card quick-card--orange" style={{ backgroundImage: `url(${cardCostBg})` }}>
+        <button className="quick-card quick-card--orange" style={{ backgroundImage: `url(${cardCostBg})` }} onClick={() => onNavigate("cost")}>
           <div>
-            <h3>à¸„à¸³à¸™à¸§à¸“à¸•à¹‰à¸™à¸—à¸¸à¸™</h3>
-            <p>à¹€à¸Šà¹‡à¸à¸à¸³à¹„à¸£à¸à¹ˆà¸­à¸™à¸‚à¸²à¸¢</p>
-            <span>à¹€à¸£à¸´à¹ˆà¸¡à¸„à¸³à¸™à¸§à¸“</span>
+            <h3>คำนวณต้นทุน</h3>
+            <p>เช็กกำไรก่อนขาย</p>
+            <span>เริ่มคำนวณ</span>
           </div>
         </button>
       </section>
-      <SectionTitle title="à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆà¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸”à¸·à¹ˆà¸¡" action="à¸”à¸¹à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”" />
+      <SectionTitle title="หมวดหมู่เครื่องดื่ม" action="ดูทั้งหมด" />
       <div className="category-strip">
         {categories.slice(1).map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
@@ -230,7 +230,7 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle title="à¹€à¸¡à¸™à¸¹à¸‚à¸²à¸¢à¸”à¸µà¸›à¸£à¸°à¸ˆà¸³à¸§à¸±à¸™" action="à¸”à¸¹à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”" />
+      <SectionTitle title="เมนูขายดีประจำวัน" action="ดูทั้งหมด" />
       <div className="horizontal-cards">
         {favoriteRecipes.map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)}>
@@ -261,7 +261,7 @@ function RecipesScreen({
 }) {
   return (
     <>
-      <TopTitle title="à¸ªà¸¹à¸•à¸£" right={<Search size={22} />} />
+      <TopTitle title="สูตร" right={<Search size={22} />} />
       <div className="category-filter">
         {categories.map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
@@ -280,9 +280,9 @@ function RecipesScreen({
         })}
       </div>
       <div className="list-meta">
-        <span>à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸” {recipes.length} à¹€à¸¡à¸™à¸¹</span>
+        <span>ทั้งหมด {recipes.length} เมนู</span>
         <span>
-          à¸¥à¹ˆà¸²à¸ªà¸¸à¸” <ChevronDown size={14} />
+          ล่าสุด <ChevronDown size={14} />
         </span>
       </div>
       <div className="recipe-grid">
@@ -321,30 +321,30 @@ function RecipeDetail({
       <div className="detail-hero">
         <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
         {recipe.status ? <span className="badge badge--hot">{recipe.status}</span> : null}
-        <span className="time-pill">{recipe.prepTime} à¸™à¸²à¸—à¸µ</span>
+        <span className="time-pill">{recipe.prepTime} นาที</span>
       </div>
       <section className="metric-row">
-        <Metric label="à¸£à¸°à¸”à¸±à¸šà¸«à¸§à¸²à¸™" value={`${recipe.sweetness}%`} />
-        <Metric label="à¸‚à¸™à¸²à¸”à¹à¸™à¸°à¸™à¸³" value={`${recipe.sizeOz} oz`} />
-        <Metric label="à¸•à¹‰à¸™à¸—à¸¸à¸™/à¹à¸à¹‰à¸§" value={`${money(cost.totalCost)} à¸šà¸²à¸—`} />
+        <Metric label="ระดับหวาน" value={`${recipe.sweetness}%`} />
+        <Metric label="ขนาดแนะนำ" value={`${recipe.sizeOz} oz`} />
+        <Metric label="ต้นทุน/แก้ว" value={`${money(cost.totalCost)} บาท`} />
       </section>
       <div className="segmented">
         <button className="is-active">16 oz</button>
         <button>22 oz</button>
-        <button>à¹à¸à¹‰à¸§à¸£à¹‰à¸­à¸™</button>
+        <button>แก้วร้อน</button>
       </div>
       <section className="detail-section">
         <div className="detail-section__title">
-          <h3>à¸ªà¹ˆà¸§à¸™à¸œà¸ªà¸¡</h3>
-          <button>à¸›à¸£à¸±à¸šà¸ªà¸¹à¸•à¸£</button>
+          <h3>ส่วนผสม</h3>
+          <button>ปรับสูตร</button>
         </div>
         {recipe.items.map((item) => {
           const ingredient = byId.get(item.ingredientId);
           return (
             <div className="ingredient-line" key={`${item.ingredientId}-${item.amount}`}>
-              <span>{ingredient?.name ?? "à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š"}</span>
+              <span>{ingredient?.name ?? "วัตถุดิบ"}</span>
               <strong>
-                {item.note ? `${item.note} Â· ` : ""}
+                {item.note ? `${item.note} · ` : ""}
                 {item.amount} {item.unit}
               </strong>
             </div>
@@ -352,7 +352,7 @@ function RecipeDetail({
         })}
       </section>
       <section className="detail-section">
-        <h3>à¸§à¸´à¸˜à¸µà¸—à¸³</h3>
+        <h3>วิธีทำ</h3>
         <ol className="steps">
           {recipe.steps.map((step) => (
             <li key={step}>{step}</li>
@@ -360,8 +360,8 @@ function RecipeDetail({
         </ol>
       </section>
       <div className="detail-actions">
-        <button>à¸„à¸³à¸™à¸§à¸“à¸•à¹‰à¸™à¸—à¸¸à¸™à¹€à¸¡à¸™à¸¹à¸™à¸µà¹‰</button>
-        <button className="primary">à¸šà¸±à¸™à¸—à¸¶à¸à¹€à¸›à¹‡à¸™à¹€à¸¡à¸™à¸¹à¹‚à¸›à¸£à¸”</button>
+        <button>คำนวณต้นทุนเมนูนี้</button>
+        <button className="primary">บันทึกเป็นเมนูโปรด</button>
       </div>
     </main>
   );
@@ -371,46 +371,46 @@ function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients
   const suggested = roundPrice(cost.totalCost / (1 - 0.6));
   return (
     <>
-      <TopTitle title="à¸„à¸³à¸™à¸§à¸“à¸•à¹‰à¸™à¸—à¸¸à¸™" />
+      <TopTitle title="คำนวณต้นทุน" />
       <div className="tabs">
-        <button className="is-active">à¸„à¸³à¸™à¸§à¸“à¸ˆà¸²à¸à¸ªà¸¹à¸•à¸£</button>
-        <button>à¸•à¸±à¹‰à¸‡à¸£à¸²à¸„à¸²à¸‚à¸²à¸¢</button>
-        <button>à¸ªà¸£à¸¸à¸›à¸à¸³à¹„à¸£</button>
+        <button className="is-active">คำนวณจากสูตร</button>
+        <button>ตั้งราคาขาย</button>
+        <button>สรุปกำไร</button>
       </div>
       <section className="selected-recipe">
         <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
         <div>
           <strong>{recipe.name} (16 oz)</strong>
-          <span>à¸•à¹‰à¸™à¸—à¸¸à¸™à¸¥à¹ˆà¸²à¸ªà¸¸à¸”à¸ˆà¸²à¸à¸ªà¸¹à¸•à¸£</span>
+          <span>ต้นทุนล่าสุดจากสูตร</span>
         </div>
-        <button>à¹€à¸›à¸¥à¸µà¹ˆà¸¢à¸™à¹€à¸¡à¸™à¸¹</button>
+        <button>เปลี่ยนเมนู</button>
       </section>
       <section className="cost-card">
-        <h3>à¸•à¹‰à¸™à¸—à¸¸à¸™à¸•à¹ˆà¸­à¹à¸à¹‰à¸§</h3>
-        <CostLine label="à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸šà¸™à¹‰à¸³" value={cost.ingredientCost} />
-        <CostLine label="à¸—à¹‡à¸­à¸›à¸›à¸´à¹‰à¸‡" value={cost.toppingCost} />
-        <CostLine label="à¸šà¸£à¸£à¸ˆà¸¸à¸ à¸±à¸“à¸‘à¹Œ" value={cost.packagingCost} />
+        <h3>ต้นทุนต่อแก้ว</h3>
+        <CostLine label="วัตถุดิบน้ำ" value={cost.ingredientCost} />
+        <CostLine label="ท็อปปิ้ง" value={cost.toppingCost} />
+        <CostLine label="บรรจุภัณฑ์" value={cost.packagingCost} />
         <div className="total-line">
-          <span>à¸£à¸§à¸¡à¸•à¹‰à¸™à¸—à¸¸à¸™</span>
-          <strong>{money(cost.totalCost)} à¸šà¸²à¸—</strong>
+          <span>รวมต้นทุน</span>
+          <strong>{money(cost.totalCost)} บาท</strong>
         </div>
         <div className="price-line">
-          <span>à¸£à¸²à¸„à¸²à¸‚à¸²à¸¢à¸›à¸±à¸ˆà¸ˆà¸¸à¸šà¸±à¸™</span>
-          <strong>{recipe.sellingPrice} à¸šà¸²à¸—</strong>
+          <span>ราคาขายปัจจุบัน</span>
+          <strong>{recipe.sellingPrice} บาท</strong>
         </div>
       </section>
       <section className="profit-panel">
         <div>
-          <span>à¸à¸³à¹„à¸£à¸•à¹ˆà¸­à¹à¸à¹‰à¸§</span>
-          <strong>{money(cost.profit)} à¸šà¸²à¸—</strong>
+          <span>กำไรต่อแก้ว</span>
+          <strong>{money(cost.profit)} บาท</strong>
         </div>
         <div>
-          <span>à¸à¸³à¹„à¸£</span>
+          <span>กำไร</span>
           <strong>{money(cost.margin)}%</strong>
         </div>
       </section>
       <section className="pricing-card">
-        <h3>à¸£à¸²à¸„à¸²à¸‚à¸²à¸¢à¸—à¸µà¹ˆà¹à¸™à¸°à¸™à¸³</h3>
+        <h3>ราคาขายที่แนะนำ</h3>
         <div className="margin-row">
           {[40, 50, 60, 70].map((margin) => (
             <button className={margin === 60 ? "is-active" : ""} key={margin}>
@@ -418,8 +418,8 @@ function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients
             </button>
           ))}
         </div>
-        <strong>{suggested} à¸šà¸²à¸—</strong>
-        <span>à¸„à¸³à¸™à¸§à¸“à¸ˆà¸²à¸ margin 60%</span>
+        <strong>{suggested} บาท</strong>
+        <span>คำนวณจาก margin 60%</span>
       </section>
     </>
   );
@@ -428,21 +428,21 @@ function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients
 function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; onAdd: () => void }) {
   return (
     <>
-      <TopTitle title="à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š" right={<Settings2 size={20} />} />
+      <TopTitle title="วัตถุดิบ" right={<Settings2 size={20} />} />
       <div className="ingredient-tabs">
-        <button className="is-active">à¸—à¸±à¹‰à¸‡à¸«à¸¡à¸”</button>
-        <button>à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š</button>
-        <button>à¸—à¹‡à¸­à¸›à¸›à¸´à¹‰à¸‡</button>
+        <button className="is-active">ทั้งหมด</button>
+        <button>วัตถุดิบ</button>
+        <button>ท็อปปิ้ง</button>
         <button onClick={onAdd}>
-          <Plus size={16} /> à¹€à¸žà¸´à¹ˆà¸¡à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š
+          <Plus size={16} /> เพิ่มวัตถุดิบ
         </button>
       </div>
       <div className="table-card">
         <div className="table-head">
-          <span>à¸Šà¸·à¹ˆà¸­à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š</span>
-          <span>à¸›à¸£à¸´à¸¡à¸²à¸“à¸—à¸µà¹ˆà¸‹à¸·à¹‰à¸­</span>
-          <span>à¸£à¸²à¸„à¸²à¸‹à¸·à¹‰à¸­</span>
-          <span>à¸•à¹‰à¸™à¸—à¸¸à¸™/à¸«à¸™à¹ˆà¸§à¸¢</span>
+          <span>ชื่อวัตถุดิบ</span>
+          <span>ปริมาณที่ซื้อ</span>
+          <span>ราคาซื้อ</span>
+          <span>ต้นทุน/หน่วย</span>
         </div>
         {ingredients.map((ingredient) => (
           <div className="table-row" key={ingredient.id}>
@@ -451,7 +451,9 @@ function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; 
               {ingredient.buyQty.toLocaleString("th-TH")} {ingredient.buyUnit}
             </span>
             <span>{ingredient.buyPrice.toLocaleString("th-TH")}</span>
-            <span>{ingredient.costPerUnit.toFixed(4)} / {ingredient.baseUnit}</span>
+            <span>
+              {ingredient.costPerUnit.toFixed(4)} / {ingredient.baseUnit}
+            </span>
           </div>
         ))}
       </div>
@@ -470,7 +472,7 @@ function FavoritesScreen({
 }) {
   return (
     <>
-      <TopTitle title="à¹€à¸¡à¸™à¸¹à¹‚à¸›à¸£à¸”" right={<button className="text-button">à¹à¸à¹‰à¹„à¸‚</button>} />
+      <TopTitle title="เมนูโปรด" right={<button className="text-button">แก้ไข</button>} />
       <div className="favorite-list">
         {recipes.map((recipe) => {
           const cost = calculateCost(recipe, ingredients);
@@ -479,7 +481,7 @@ function FavoritesScreen({
               <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
               <div>
                 <strong>{recipe.name}</strong>
-                <span>16 oz Â· à¸•à¹‰à¸™à¸—à¸¸à¸™ {money(cost.totalCost)} à¸šà¸²à¸—</span>
+                <span>16 oz · ต้นทุน {money(cost.totalCost)} บาท</span>
               </div>
               <Heart size={20} className="is-favorite" fill="currentColor" />
             </button>
@@ -490,27 +492,27 @@ function FavoritesScreen({
   );
 }
 
-function IngredientForm({ onBack, onSubmit }: { onBack: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void }) {
+function IngredientForm({ onBack, onSubmit }: { onBack: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   return (
     <main className="form-screen">
-      <TopTitle title="à¹€à¸žà¸´à¹ˆà¸¡à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š" left={<ChevronLeft size={24} onClick={onBack} />} />
+      <TopTitle title="เพิ่มวัตถุดิบ" left={<ChevronLeft size={24} onClick={onBack} />} />
       <form className="form-card" onSubmit={onSubmit}>
-        <FormField name="name" label="à¸Šà¸·à¹ˆà¸­à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š" placeholder="à¹€à¸Šà¹ˆà¸™ à¸™à¸¡à¸ªà¸”" />
+        <FormField name="name" label="ชื่อวัตถุดิบ" placeholder="เช่น นมสด" />
         <label>
-          à¸›à¸£à¸°à¹€à¸ à¸—
-          <select name="category" defaultValue="à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸šà¸™à¹‰à¸³">
-            <option>à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸šà¸™à¹‰à¸³</option>
-            <option>à¸—à¹‡à¸­à¸›à¸›à¸´à¹‰à¸‡</option>
-            <option>à¸šà¸£à¸£à¸ˆà¸¸à¸ à¸±à¸“à¸‘à¹Œ</option>
+          ประเภท
+          <select name="category" defaultValue="วัตถุดิบน้ำ">
+            <option>วัตถุดิบน้ำ</option>
+            <option>ท็อปปิ้ง</option>
+            <option>บรรจุภัณฑ์</option>
           </select>
         </label>
-        <FormField name="buyQty" label="à¸›à¸£à¸´à¸¡à¸²à¸“à¸—à¸µà¹ˆà¸‹à¸·à¹‰à¸­" placeholder="0" type="number" />
-        <FormField name="buyPrice" label="à¸£à¸²à¸„à¸²à¸‹à¸·à¹‰à¸­ (à¸šà¸²à¸—)" placeholder="0.00" type="number" />
+        <FormField name="buyQty" label="ปริมาณที่ซื้อ" placeholder="0" type="number" />
+        <FormField name="buyPrice" label="ราคาซื้อ (บาท)" placeholder="0.00" type="number" />
         <label>
-          à¸«à¸¡à¸²à¸¢à¹€à¸«à¸•à¸¸
-          <textarea name="note" placeholder="à¸–à¹‰à¸²à¸¡à¸µ" />
+          หมายเหตุ
+          <textarea name="note" placeholder="ถ้ามี" />
         </label>
-        <button className="submit-button">à¸šà¸±à¸™à¸—à¸¶à¸</button>
+        <button className="submit-button">บันทึก</button>
       </form>
     </main>
   );
@@ -523,15 +525,15 @@ function RecipeForm({
 }: {
   categories: Category[];
   onBack: () => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <main className="form-screen">
-      <TopTitle title="à¹€à¸žà¸´à¹ˆà¸¡à¸ªà¸¹à¸•à¸£" left={<ChevronLeft size={24} onClick={onBack} />} />
+      <TopTitle title="เพิ่มสูตร" left={<ChevronLeft size={24} onClick={onBack} />} />
       <form className="form-card" onSubmit={onSubmit}>
-        <FormField name="name" label="à¸Šà¸·à¹ˆà¸­à¹€à¸¡à¸™à¸¹" placeholder="à¹€à¸Šà¹ˆà¸™ à¸Šà¸²à¹„à¸—à¸¢à¹„à¸‚à¹ˆà¸¡à¸¸à¸" />
+        <FormField name="name" label="ชื่อเมนู" placeholder="เช่น ชาไทยไข่มุก" />
         <label>
-          à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆ
+          หมวดหมู่
           <select name="categoryId" defaultValue="tea">
             {categories.slice(1).map((category) => (
               <option value={category.id} key={category.id}>
@@ -542,13 +544,13 @@ function RecipeForm({
         </label>
         <div className="upload-box">
           <Package size={22} />
-          <span>à¸­à¸±à¸›à¹‚à¸«à¸¥à¸”à¸£à¸¹à¸›à¹€à¸¡à¸™à¸¹</span>
-          <small>à¹€à¸§à¸­à¸£à¹Œà¸Šà¸±à¸™ Apps Script à¸ˆà¸°à¸ªà¹ˆà¸‡à¸£à¸¹à¸›à¹€à¸‚à¹‰à¸² Google Drive</small>
+          <span>อัปโหลดรูปเมนู</span>
+          <small>เวอร์ชัน Apps Script จะส่งรูปเข้า Google Drive</small>
         </div>
-        <FormField name="prepTime" label="à¹€à¸§à¸¥à¸²à¹€à¸•à¸£à¸µà¸¢à¸¡ (à¸™à¸²à¸—à¸µ)" placeholder="5" type="number" />
-        <FormField name="sweetness" label="à¸£à¸°à¸”à¸±à¸šà¸«à¸§à¸²à¸™ (%)" placeholder="75" type="number" />
-        <FormField name="sellingPrice" label="à¸£à¸²à¸„à¸²à¸‚à¸²à¸¢ (à¸šà¸²à¸—)" placeholder="35" type="number" />
-        <button className="submit-button">à¸šà¸±à¸™à¸—à¸¶à¸à¸ªà¸¹à¸•à¸£</button>
+        <FormField name="prepTime" label="เวลาเตรียม (นาที)" placeholder="5" type="number" />
+        <FormField name="sweetness" label="ระดับหวาน (%)" placeholder="75" type="number" />
+        <FormField name="sellingPrice" label="ราคาขาย (บาท)" placeholder="35" type="number" />
+        <button className="submit-button">บันทึกสูตร</button>
       </form>
     </main>
   );
@@ -564,12 +566,12 @@ function FormField({ name, label, placeholder, type = "text" }: { name: string; 
 }
 
 function BottomNav({ active, onChange, onAdd }: { active: Tab; onChange: (tab: Tab) => void; onAdd: () => void }) {
-  const tabs: Array<{ id: Tab; label: string; icon: React.ElementType }> = [
-    { id: "home", label: "à¸«à¸™à¹‰à¸²à¹à¸£à¸", icon: Home },
-    { id: "recipes", label: "à¸ªà¸¹à¸•à¸£", icon: Grid2X2 },
-    { id: "cost", label: "à¸•à¹‰à¸™à¸—à¸¸à¸™", icon: ShoppingBag },
-    { id: "ingredients", label: "à¸§à¸±à¸•à¸–à¸¸à¸”à¸´à¸š", icon: WalletCards },
-    { id: "favorites", label: "à¹‚à¸›à¸£à¸”", icon: Heart }
+  const tabs: Array<{ id: Tab; label: string; icon: ElementType }> = [
+    { id: "home", label: "หน้าแรก", icon: Home },
+    { id: "recipes", label: "สูตร", icon: Grid2X2 },
+    { id: "cost", label: "ต้นทุน", icon: ShoppingBag },
+    { id: "ingredients", label: "วัตถุดิบ", icon: WalletCards },
+    { id: "favorites", label: "โปรด", icon: Heart }
   ];
   return (
     <nav className="bottom-nav">
@@ -591,7 +593,7 @@ function NavButton({
   active,
   onChange
 }: {
-  item: { id: Tab; label: string; icon: React.ElementType };
+  item: { id: Tab; label: string; icon: ElementType };
   active: Tab;
   onChange: (tab: Tab) => void;
 }) {
@@ -604,7 +606,7 @@ function NavButton({
   );
 }
 
-function TopTitle({ title, right, left }: { title: string; right?: React.ReactNode; left?: React.ReactNode }) {
+function TopTitle({ title, right, left }: { title: string; right?: ReactNode; left?: ReactNode }) {
   return (
     <header className="top-title">
       <div>{left}</div>
@@ -638,7 +640,7 @@ function CostLine({ label, value }: { label: string; value: number }) {
   return (
     <div className="cost-line">
       <span>{label}</span>
-      <strong>{money(value)} à¸šà¸²à¸—</strong>
+      <strong>{money(value)} บาท</strong>
     </div>
   );
 }
