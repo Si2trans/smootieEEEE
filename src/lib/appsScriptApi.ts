@@ -5,7 +5,7 @@ const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
 
 export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
-const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v1";
+const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v2";
 
 type BootstrapResponse = {
   ok?: boolean;
@@ -303,6 +303,7 @@ function dedupeRecipes(recipes: Recipe[]) {
 
 function groupRecipeItems(rows: Array<Record<string, unknown>>) {
   const grouped = new Map<string, RecipeItem[]>();
+  const seen = new Map<string, Set<string>>();
   rows
     .slice()
     .sort((a, b) => number(a.sort_order) - number(b.sort_order))
@@ -314,6 +315,11 @@ function groupRecipeItems(rows: Array<Record<string, unknown>>) {
         unit: unit(row.unit),
         note: text(row.note)
       };
+      const itemKey = `${item.ingredientId}|${item.amount}|${item.unit}|${item.note || ""}`;
+      const recipeSeen = seen.get(recipeId) || new Set<string>();
+      if (recipeSeen.has(itemKey)) return;
+      recipeSeen.add(itemKey);
+      seen.set(recipeId, recipeSeen);
       grouped.set(recipeId, [...(grouped.get(recipeId) || []), item]);
     });
   return grouped;

@@ -247,7 +247,6 @@ function App() {
       };
       await saveRecipe({ ...savedRecipe, imageFileId });
       applyRecipeLocally(savedRecipe);
-      await refreshData(recipeId).catch(() => undefined);
       setEditingRecipe(null);
       setScreen("detail");
     } catch (error) {

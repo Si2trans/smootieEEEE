@@ -235,6 +235,7 @@ function saveRecipe(payload) {
       item.sort_order = index + 1;
       saveObject(SHEETS.recipeItems, item);
     });
+    dedupeRecipeItems(recipe.id);
   }
   return { ok: true, recipe: saved.item || recipe, mode: saved.mode || "saved" };
 }
@@ -273,6 +274,30 @@ function deleteRecipeItems(recipeId) {
   const recipeIndex = headers.indexOf("recipe_id");
   for (let row = values.length - 1; row >= 1; row--) {
     if (cleanId(values[row][recipeIndex]) === recipeId) sheet.deleteRow(row + 1);
+  }
+}
+
+function dedupeRecipeItems(recipeId) {
+  recipeId = cleanId(recipeId);
+  const sheet = getSheet(SHEETS.recipeItems);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const recipeIndex = headers.indexOf("recipe_id");
+  const ingredientIndex = headers.indexOf("ingredient_id");
+  const amountIndex = headers.indexOf("amount");
+  const unitIndex = headers.indexOf("unit");
+  const noteIndex = headers.indexOf("note");
+  const seen = {};
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (cleanId(values[row][recipeIndex]) !== recipeId) continue;
+    const key = [
+      cleanId(values[row][ingredientIndex]),
+      String(values[row][amountIndex]),
+      cleanId(values[row][unitIndex]),
+      cleanId(values[row][noteIndex])
+    ].join("|");
+    if (seen[key]) sheet.deleteRow(row + 1);
+    seen[key] = true;
   }
 }
 
