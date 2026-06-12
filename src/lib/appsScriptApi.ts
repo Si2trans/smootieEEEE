@@ -21,6 +21,30 @@ export type AppData = {
   recipes: Recipe[];
 };
 
+type SaveIngredientInput = Omit<Ingredient, "costPerUnit"> & { costPerUnit?: number };
+
+type SaveRecipeInput = {
+  id?: string;
+  name: string;
+  categoryId: CategoryId;
+  imageUrl?: string;
+  imageFileId?: string;
+  status?: string;
+  prepTime: number;
+  sweetness: number;
+  sizeOz: number;
+  sellingPrice: number;
+  favorite?: boolean;
+  rating?: number;
+  steps?: string[];
+};
+
+type UploadImageInput = {
+  fileName: string;
+  mimeType: string;
+  base64: string;
+};
+
 export async function fetchAppData(): Promise<AppData> {
   const url = new URL(APPS_SCRIPT_URL);
   url.searchParams.set("action", "getBootstrapData");
@@ -41,6 +65,124 @@ export async function fetchAppData(): Promise<AppData> {
   }
 
   return normalizeBootstrapData(data);
+}
+
+export async function saveIngredient(input: SaveIngredientInput) {
+  const buyQty = Number(input.buyQty || 0);
+  const buyPrice = Number(input.buyPrice || 0);
+  const costPerUnit = input.costPerUnit ?? (buyQty > 0 ? buyPrice / buyQty : 0);
+
+  return postAction("saveIngredient", {
+    id: input.id || `ing_${Date.now()}`,
+    name: input.name,
+    category: input.category,
+    buy_qty: buyQty,
+    buy_unit: input.buyUnit,
+    buy_price: buyPrice,
+    base_unit: input.baseUnit,
+    cost_per_unit: costPerUnit,
+    note: input.note || ""
+  });
+}
+
+export async function saveRecipe(input: SaveRecipeInput) {
+  return postAction("saveRecipe", {
+    recipe: {
+      id: input.id || `rec_${Date.now()}`,
+      name: input.name,
+      category_id: input.categoryId,
+      image_url: input.imageUrl || "",
+      image_file_id: input.imageFileId || "",
+      status: input.status || "",
+      prep_time: Number(input.prepTime || 5),
+      sweetness: Number(input.sweetness || 75),
+      size_oz: Number(input.sizeOz || 16),
+      selling_price: Number(input.sellingPrice || 0),
+      favorite: Boolean(input.favorite),
+      rating: Number(input.rating || 4.5),
+      steps: (input.steps || []).filter(Boolean).join("|"),
+      active: true
+    },
+    items: []
+  });
+}
+
+export async function deleteRecipe(recipeId: string) {
+  return postAction("deleteRecipe", { id: recipeId });
+}
+
+export async function deleteIngredient(ingredientId: string) {
+  return postAction("deleteIngredient", { id: ingredientId });
+}
+
+export async function toggleFavoriteRemote(recipeId: string) {
+  return postAction("toggleFavorite", { recipe_id: recipeId });
+}
+
+export async function uploadRecipeImage(input: UploadImageInput): Promise<{ image_url: string; file_id: string }> {
+  const data = await postAction("uploadRecipeImage", input);
+  return {
+    image_url: text(data.image_url),
+    file_id: text(data.file_id)
+  };
+}
+
+export async function fileToImagePayload(file: File): Promise<UploadImageInput> {
+  const dataUrl = await resizeImage(file, 1200, 0.86);
+  const [meta, base64] = dataUrl.split(",");
+  const mimeType = /data:(.*);base64/.exec(meta)?.[1] || file.type || "image/jpeg";
+  return {
+    fileName: file.name || `recipe-${Date.now()}.jpg`,
+    mimeType,
+    base64
+  };
+}
+
+async function postAction(action: string, payload: Record<string, unknown>) {
+  const url = new URL(APPS_SCRIPT_URL);
+  url.searchParams.set("action", action);
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Apps Script ${action} failed: ${response.status}`);
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  if (data.ok === false) {
+    throw new Error(text(data.error) || `Apps Script ${action} returned ok=false`);
+  }
+  return data;
+}
+
+function resizeImage(file: File, maxSize: number, quality: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Cannot read image file"));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("Cannot load image file"));
+      image.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Cannot resize image"));
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function normalizeBootstrapData(data: BootstrapResponse): AppData {

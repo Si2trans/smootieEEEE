@@ -188,6 +188,8 @@ function doPost(e) {
   try {
     if (action === "saveIngredient") return jsonResponse(saveObject(SHEETS.ingredients, payload));
     if (action === "saveRecipe") return jsonResponse(saveRecipe(payload));
+    if (action === "deleteIngredient") return jsonResponse(deleteObject(SHEETS.ingredients, payload.id));
+    if (action === "deleteRecipe") return jsonResponse(deleteRecipe(payload.id));
     if (action === "toggleFavorite") return jsonResponse(toggleFavorite(payload.recipe_id));
     if (action === "calculateCost") return jsonResponse(calculateCost(payload.recipe_id));
     if (action === "uploadRecipeImage") return jsonResponse(uploadRecipeImage(payload));
@@ -220,6 +222,7 @@ function getRecipe(id) {
 function saveRecipe(payload) {
   const recipe = payload.recipe || payload;
   if (!recipe.id) recipe.id = "rec_" + Date.now();
+  if (!recipe.created_at) recipe.created_at = new Date().toISOString();
   recipe.updated_at = new Date().toISOString();
   const saved = saveObject(SHEETS.recipes, recipe);
   if (payload.items && payload.items.length) {
@@ -231,6 +234,51 @@ function saveRecipe(payload) {
     });
   }
   return { ok: true, recipe: saved };
+}
+
+function deleteRecipe(recipeId) {
+  const sheet = getSheet(SHEETS.recipes);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idIndex = headers.indexOf("id");
+  const activeIndex = headers.indexOf("active");
+  const updatedIndex = headers.indexOf("updated_at");
+  if (!recipeId) throw new Error("Missing recipe id.");
+
+  for (let row = 1; row < values.length; row++) {
+    if (values[row][idIndex] === recipeId) {
+      if (activeIndex >= 0) {
+        sheet.getRange(row + 1, activeIndex + 1).setValue(false);
+        if (updatedIndex >= 0) sheet.getRange(row + 1, updatedIndex + 1).setValue(new Date().toISOString());
+      } else {
+        sheet.deleteRow(row + 1);
+      }
+      deleteRecipeItems(recipeId);
+      removeFavorite(recipeId);
+      return { ok: true, id: recipeId, mode: "deleted" };
+    }
+  }
+  return { ok: true, id: recipeId, mode: "not_found" };
+}
+
+function deleteRecipeItems(recipeId) {
+  const sheet = getSheet(SHEETS.recipeItems);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const recipeIndex = headers.indexOf("recipe_id");
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (values[row][recipeIndex] === recipeId) sheet.deleteRow(row + 1);
+  }
+}
+
+function removeFavorite(recipeId) {
+  const sheet = getSheet(SHEETS.favorites);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const recipeIndex = headers.indexOf("recipe_id");
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (values[row][recipeIndex] === recipeId) sheet.deleteRow(row + 1);
+  }
 }
 
 function toggleFavorite(recipeId) {
@@ -273,8 +321,7 @@ function calculateCost(recipeId) {
 }
 
 function uploadRecipeImage(payload) {
-  const folderId = PropertiesService.getScriptProperties().getProperty("IMAGE_FOLDER_ID");
-  if (!folderId) throw new Error("Set IMAGE_FOLDER_ID in Script Properties first.");
+  const folderId = getImageFolderId();
   const bytes = Utilities.base64Decode(payload.base64);
   const blob = Utilities.newBlob(bytes, payload.mimeType || "image/jpeg", payload.fileName || "recipe.jpg");
   const file = DriveApp.getFolderById(folderId).createFile(blob);
@@ -284,6 +331,15 @@ function uploadRecipeImage(payload) {
     file_id: file.getId(),
     image_url: "https://drive.google.com/uc?export=view&id=" + file.getId()
   };
+}
+
+function getImageFolderId() {
+  const props = PropertiesService.getScriptProperties();
+  const current = props.getProperty("IMAGE_FOLDER_ID");
+  if (current) return current;
+  const folder = DriveApp.createFolder("Drink Cost Studio Images");
+  props.setProperty("IMAGE_FOLDER_ID", folder.getId());
+  return folder.getId();
 }
 
 function readObjects(sheetName) {
@@ -306,7 +362,7 @@ function saveObject(sheetName, object) {
   if (!object.id) object.id = "id_" + Date.now();
   for (let row = 1; row < values.length; row++) {
     if (values[row][idIndex] === object.id) {
-      headers.forEach((header, index) => sheet.getRange(row + 1, index + 1).setValue(object[header] || ""));
+      headers.forEach((header, index) => sheet.getRange(row + 1, index + 1).setValue(cellValue(object, header)));
       return { ok: true, item: object, mode: "updated" };
     }
   }
@@ -315,7 +371,26 @@ function saveObject(sheetName, object) {
 }
 
 function appendObject(sheet, headers, object) {
-  sheet.appendRow(headers.map((header) => object[header] || ""));
+  sheet.appendRow(headers.map((header) => cellValue(object, header)));
+}
+
+function deleteObject(sheetName, id) {
+  if (!id) throw new Error("Missing id.");
+  const sheet = getSheet(sheetName);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idIndex = headers.indexOf("id");
+  for (let row = 1; row < values.length; row++) {
+    if (values[row][idIndex] === id) {
+      sheet.deleteRow(row + 1);
+      return { ok: true, id: id, mode: "deleted" };
+    }
+  }
+  return { ok: true, id: id, mode: "not_found" };
+}
+
+function cellValue(object, header) {
+  return object[header] === undefined || object[header] === null ? "" : object[header];
 }
 
 function getSheet(name) {

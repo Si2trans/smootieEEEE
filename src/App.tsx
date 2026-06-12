@@ -11,6 +11,7 @@ import {
   Home,
   Milk,
   Package,
+  Pencil,
   Plus,
   Search,
   Settings2,
@@ -19,6 +20,7 @@ import {
   Sparkles,
   Star,
   Store,
+  Trash2,
   WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -27,43 +29,56 @@ import cardCostBg from "./assets/UI/card-cost-bg.png";
 import cardRecipesBg from "./assets/UI/card-recipes-bg.png";
 import { DrinkArt } from "./components/DrinkArt";
 import { RecipeCard } from "./components/RecipeCard";
-import { categories as mockCategories, ingredients, recipes as initialRecipes } from "./data/mockData";
-import { fetchAppData } from "./lib/appsScriptApi";
+import { categories as mockCategories, ingredients as mockIngredients, recipes as mockRecipes } from "./data/mockData";
+import {
+  deleteIngredient,
+  deleteRecipe,
+  fetchAppData,
+  fileToImagePayload,
+  saveIngredient,
+  saveRecipe,
+  toggleFavoriteRemote,
+  uploadRecipeImage
+} from "./lib/appsScriptApi";
 import { calculateCost, money, roundPrice } from "./lib/cost";
-import type { Category, CategoryId, Ingredient, Recipe } from "./types/app";
+import type { Category, CategoryId, Ingredient, Recipe, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "favorites";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
 
 const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
+const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
+const units: Unit[] = ["ml", "g", "piece"];
 
 function App() {
   const [tab, setTab] = useState<Tab>("home");
   const [screen, setScreen] = useState<Screen>("main");
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>("all");
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(initialRecipes[0]);
+  const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(mockRecipes[0]);
   const [categoryList, setCategoryList] = useState<Category[]>(mockCategories);
-  const [recipes, setRecipes] = useState(initialRecipes);
-  const [ingredientList, setIngredientList] = useState(ingredients);
+  const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes);
+  const [ingredientList, setIngredientList] = useState<Ingredient[]>(mockIngredients);
+  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
+  const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let ignore = false;
-
     fetchAppData()
       .then((data) => {
         if (ignore) return;
-        setCategoryList(data.categories);
-        setIngredientList(data.ingredients);
-        setRecipes(data.recipes);
-        setSelectedRecipe(data.recipes[0] || initialRecipes[0]);
+        applyData(data, selectedRecipe.id);
       })
       .catch((error) => {
         console.warn(error);
+        setMessage("ยังต่อ Google Sheet ไม่ได้ เลยแสดงข้อมูลตัวอย่างก่อน");
       });
 
     return () => {
       ignore = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filteredRecipes = useMemo(() => {
@@ -74,96 +89,224 @@ function App() {
   const selectedCost = calculateCost(selectedRecipe, ingredientList);
   const favoriteRecipes = recipes.filter((recipe) => recipe.favorite);
 
+  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[] }, selectedId?: string) {
+    setCategoryList(data.categories);
+    setIngredientList(data.ingredients);
+    setRecipes(data.recipes);
+    setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current.id)) || data.recipes[0] || mockRecipes[0]);
+  }
+
+  async function refreshData(selectedId?: string) {
+    const data = await fetchAppData();
+    applyData(data, selectedId);
+    return data;
+  }
+
   function openRecipe(recipe: Recipe) {
     setSelectedRecipe(recipe);
     setScreen("detail");
   }
 
-  function toggleFavorite(recipeId: string) {
+  async function toggleFavorite(recipeId: string) {
     setRecipes((items) => items.map((item) => (item.id === recipeId ? { ...item, favorite: !item.favorite } : item)));
     if (selectedRecipe.id === recipeId) setSelectedRecipe((recipe) => ({ ...recipe, favorite: !recipe.favorite }));
+    try {
+      await toggleFavoriteRemote(recipeId);
+      await refreshData(recipeId);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกเมนูโปรดไม่สำเร็จ");
+      await refreshData(recipeId).catch(() => undefined);
+    }
   }
 
-  function addIngredient(event: FormEvent<HTMLFormElement>) {
+  async function submitIngredient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSaving(true);
+    setMessage("");
     const form = new FormData(event.currentTarget);
     const buyQty = Number(form.get("buyQty") || 1);
     const buyPrice = Number(form.get("buyPrice") || 0);
-    const costPerUnit = buyQty > 0 ? buyPrice / buyQty : 0;
-    const ingredient: Ingredient = {
-      id: `ing_${Date.now()}`,
-      name: String(form.get("name") || "วัตถุดิบใหม่"),
-      category: String(form.get("category") || "วัตถุดิบน้ำ"),
-      buyQty,
-      buyUnit: "ml",
-      buyPrice,
-      baseUnit: "ml",
-      costPerUnit,
-      note: String(form.get("note") || "")
-    };
-    setIngredientList((items) => [ingredient, ...items]);
-    setScreen("main");
-    setTab("ingredients");
+    const buyUnit = String(form.get("buyUnit") || "ml") as Unit;
+    const baseUnit = String(form.get("baseUnit") || buyUnit) as Unit;
+    try {
+      await saveIngredient({
+        id: editingIngredient?.id || `ing_${Date.now()}`,
+        name: String(form.get("name") || "วัตถุดิบใหม่"),
+        category: String(form.get("category") || "วัตถุดิบน้ำ"),
+        buyQty,
+        buyUnit,
+        buyPrice,
+        baseUnit,
+        costPerUnit: buyQty > 0 ? buyPrice / buyQty : 0,
+        note: String(form.get("note") || "")
+      });
+      await refreshData();
+      setEditingIngredient(null);
+      setTab("ingredients");
+      setScreen("main");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกวัตถุดิบไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function addRecipe(event: FormEvent<HTMLFormElement>) {
+  async function submitRecipe(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setSaving(true);
+    setMessage("");
     const form = new FormData(event.currentTarget);
-    const recipe: Recipe = {
-      id: `rec_${Date.now()}`,
-      name: String(form.get("name") || "สูตรใหม่"),
-      categoryId: String(form.get("categoryId") || "tea") as CategoryId,
-      imageKey: "thai",
-      prepTime: Number(form.get("prepTime") || 5),
-      sweetness: Number(form.get("sweetness") || 75),
-      sizeOz: 16,
-      sellingPrice: Number(form.get("sellingPrice") || 35),
-      favorite: false,
-      rating: 4.5,
-      items: [],
-      steps: ["เพิ่มส่วนผสมและวิธีทำในเวอร์ชันเชื่อม Google Sheet"]
-    };
-    setRecipes((items) => [recipe, ...items]);
-    setSelectedRecipe(recipe);
-    setScreen("detail");
+    const file = form.get("image");
+    let imageUrl = editingRecipe?.imageUrl;
+    let imageFileId = "";
+    try {
+      if (file instanceof File && file.size > 0) {
+        const uploaded = await uploadRecipeImage(await fileToImagePayload(file));
+        imageUrl = uploaded.image_url;
+        imageFileId = uploaded.file_id;
+      }
+      const recipeId = editingRecipe?.id || `rec_${Date.now()}`;
+      await saveRecipe({
+        id: recipeId,
+        name: String(form.get("name") || "สูตรใหม่"),
+        categoryId: String(form.get("categoryId") || "tea") as CategoryId,
+        imageUrl,
+        imageFileId,
+        status: String(form.get("status") || ""),
+        prepTime: Number(form.get("prepTime") || 5),
+        sweetness: Number(form.get("sweetness") || 75),
+        sizeOz: Number(form.get("sizeOz") || 16),
+        sellingPrice: Number(form.get("sellingPrice") || 35),
+        favorite: editingRecipe?.favorite || false,
+        rating: editingRecipe?.rating || 4.5,
+        steps: String(form.get("steps") || "")
+          .split("\n")
+          .map((step) => step.trim())
+          .filter(Boolean)
+      });
+      await refreshData(recipeId);
+      setEditingRecipe(null);
+      setScreen("detail");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกสูตรไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeRecipe(recipeId: string) {
+    if (!window.confirm("ลบสูตรนี้ออกจากแอปใช่ไหม?")) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await deleteRecipe(recipeId);
+      await refreshData();
+      setTab("recipes");
+      setScreen("main");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ลบสูตรไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeIngredient(ingredientId: string) {
+    if (!window.confirm("ลบวัตถุดิบนี้ใช่ไหม?")) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await deleteIngredient(ingredientId);
+      await refreshData();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ลบวัตถุดิบไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startAddRecipe() {
+    setEditingRecipe(null);
+    setMessage("");
+    setScreen("recipeForm");
+  }
+
+  function startEditRecipe(recipe: Recipe) {
+    setEditingRecipe(recipe);
+    setMessage("");
+    setScreen("recipeForm");
+  }
+
+  function startAddIngredient() {
+    setEditingIngredient(null);
+    setMessage("");
+    setScreen("ingredientForm");
+  }
+
+  function startEditIngredient(ingredient: Ingredient) {
+    setEditingIngredient(ingredient);
+    setMessage("");
+    setScreen("ingredientForm");
   }
 
   return (
     <div className="app-shell">
       <div className="phone">
         {screen === "detail" ? (
-          <RecipeDetail recipe={selectedRecipe} ingredients={ingredientList} onBack={() => setScreen("main")} onFavorite={toggleFavorite} />
+          <RecipeDetail
+            recipe={selectedRecipe}
+            ingredients={ingredientList}
+            saving={saving}
+            onBack={() => setScreen("main")}
+            onDelete={removeRecipe}
+            onEdit={startEditRecipe}
+            onFavorite={toggleFavorite}
+          />
         ) : screen === "ingredientForm" ? (
-          <IngredientForm onBack={() => setScreen("main")} onSubmit={addIngredient} />
+          <IngredientForm
+            ingredient={editingIngredient}
+            message={message}
+            saving={saving}
+            onBack={() => setScreen("main")}
+            onSubmit={submitIngredient}
+          />
         ) : screen === "recipeForm" ? (
-          <RecipeForm categories={categoryList} onBack={() => setScreen("main")} onSubmit={addRecipe} />
+          <RecipeForm
+            categories={categoryList}
+            message={message}
+            recipe={editingRecipe}
+            saving={saving}
+            onBack={() => setScreen("main")}
+            onSubmit={submitRecipe}
+          />
         ) : (
           <>
             <main className="content">
+              {message ? <div className="status-banner">{message}</div> : null}
               {tab === "home" ? (
-                <HomeScreen
-                  categories={categoryList}
-                  favoriteRecipes={favoriteRecipes}
-                  onOpen={openRecipe}
-                  onNavigate={setTab}
-                />
+                <HomeScreen categories={categoryList} favoriteRecipes={favoriteRecipes} onNavigate={setTab} onOpen={openRecipe} />
               ) : tab === "recipes" ? (
                 <RecipesScreen
                   categories={categoryList}
+                  recipes={filteredRecipes}
                   selectedCategory={selectedCategory}
                   onCategory={setSelectedCategory}
-                  recipes={filteredRecipes}
                   onOpen={openRecipe}
                 />
               ) : tab === "cost" ? (
-                <CostScreen recipe={selectedRecipe} ingredients={ingredientList} cost={selectedCost} />
+                <CostScreen cost={selectedCost} ingredients={ingredientList} recipe={selectedRecipe} />
               ) : tab === "ingredients" ? (
-                <IngredientsScreen ingredients={ingredientList} onAdd={() => setScreen("ingredientForm")} />
+                <IngredientsScreen
+                  ingredients={ingredientList}
+                  saving={saving}
+                  onAdd={startAddIngredient}
+                  onDelete={removeIngredient}
+                  onEdit={startEditIngredient}
+                />
               ) : (
-                <FavoritesScreen recipes={favoriteRecipes} ingredients={ingredientList} onOpen={openRecipe} />
+                <FavoritesScreen ingredients={ingredientList} recipes={favoriteRecipes} onOpen={openRecipe} />
               )}
             </main>
-            <BottomNav active={tab} onChange={setTab} onAdd={() => setScreen("recipeForm")} />
+            <BottomNav active={tab} onAdd={startAddRecipe} onChange={setTab} />
           </>
         )}
       </div>
@@ -196,7 +339,7 @@ function HomeScreen({
           <Search size={18} />
           <input placeholder="ค้นหาเมนู เช่น ชาไทย, โกโก้, นมสด..." />
         </label>
-        <button className="icon-button">
+        <button className="icon-button" type="button">
           <SlidersHorizontal size={19} />
         </button>
       </div>
@@ -216,12 +359,12 @@ function HomeScreen({
           </div>
         </button>
       </section>
-      <SectionTitle title="หมวดหมู่เครื่องดื่ม" action="ดูทั้งหมด" />
+      <SectionTitle action="ดูทั้งหมด" title="หมวดหมู่เครื่องดื่ม" />
       <div className="category-strip">
         {categories.slice(1).map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
           return (
-            <button className="category-chip" key={category.id}>
+            <button className="category-chip" key={category.id} type="button">
               <span style={{ background: category.color }}>
                 <Icon size={18} />
               </span>
@@ -230,11 +373,11 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle title="เมนูขายดีประจำวัน" action="ดูทั้งหมด" />
+      <SectionTitle action="ดูทั้งหมด" title="เมนูขายดีประจำวัน" />
       <div className="horizontal-cards">
         {favoriteRecipes.map((recipe) => (
-          <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)}>
-            <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
+          <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
+            <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
             <strong>{recipe.name}</strong>
             <span>
               <Star size={12} fill="currentColor" /> {recipe.rating}
@@ -261,16 +404,12 @@ function RecipesScreen({
 }) {
   return (
     <>
-      <TopTitle title="สูตร" right={<Search size={22} />} />
+      <TopTitle right={<Search size={22} />} title="สูตร" />
       <div className="category-filter">
         {categories.map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
           return (
-            <button
-              className={selectedCategory === category.id ? "is-active" : ""}
-              key={category.id}
-              onClick={() => onCategory(category.id)}
-            >
+            <button className={selectedCategory === category.id ? "is-active" : ""} key={category.id} onClick={() => onCategory(category.id)} type="button">
               <span style={{ background: category.color }}>
                 <Icon size={18} />
               </span>
@@ -297,12 +436,18 @@ function RecipesScreen({
 function RecipeDetail({
   recipe,
   ingredients,
+  saving,
   onBack,
+  onDelete,
+  onEdit,
   onFavorite
 }: {
   recipe: Recipe;
   ingredients: Ingredient[];
+  saving: boolean;
   onBack: () => void;
+  onDelete: (id: string) => void;
+  onEdit: (recipe: Recipe) => void;
   onFavorite: (id: string) => void;
 }) {
   const cost = calculateCost(recipe, ingredients);
@@ -310,12 +455,20 @@ function RecipeDetail({
   return (
     <main className="detail">
       <div className="detail-topbar">
-        <button onClick={onBack}>
+        <button onClick={onBack} type="button">
           <ChevronLeft size={24} />
         </button>
         <strong>{recipe.name}</strong>
-        <button onClick={() => onFavorite(recipe.id)}>
-          <Heart size={22} className={recipe.favorite ? "is-favorite" : ""} fill={recipe.favorite ? "currentColor" : "none"} />
+        <button onClick={() => onFavorite(recipe.id)} type="button">
+          <Heart className={recipe.favorite ? "is-favorite" : ""} fill={recipe.favorite ? "currentColor" : "none"} size={22} />
+        </button>
+      </div>
+      <div className="detail-tools">
+        <button onClick={() => onEdit(recipe)} type="button">
+          <Pencil size={16} /> แก้ไข
+        </button>
+        <button disabled={saving} onClick={() => onDelete(recipe.id)} type="button">
+          <Trash2 size={16} /> ลบ
         </button>
       </div>
       <div className="detail-hero">
@@ -329,27 +482,31 @@ function RecipeDetail({
         <Metric label="ต้นทุน/แก้ว" value={`${money(cost.totalCost)} บาท`} />
       </section>
       <div className="segmented">
-        <button className="is-active">16 oz</button>
-        <button>22 oz</button>
-        <button>แก้วร้อน</button>
+        <button className="is-active" type="button">16 oz</button>
+        <button type="button">22 oz</button>
+        <button type="button">แก้วร้อน</button>
       </div>
       <section className="detail-section">
         <div className="detail-section__title">
           <h3>ส่วนผสม</h3>
-          <button>ปรับสูตร</button>
+          <button onClick={() => onEdit(recipe)} type="button">ปรับสูตร</button>
         </div>
-        {recipe.items.map((item) => {
-          const ingredient = byId.get(item.ingredientId);
-          return (
-            <div className="ingredient-line" key={`${item.ingredientId}-${item.amount}`}>
-              <span>{ingredient?.name ?? "วัตถุดิบ"}</span>
-              <strong>
-                {item.note ? `${item.note} · ` : ""}
-                {item.amount} {item.unit}
-              </strong>
-            </div>
-          );
-        })}
+        {recipe.items.length ? (
+          recipe.items.map((item) => {
+            const ingredient = byId.get(item.ingredientId);
+            return (
+              <div className="ingredient-line" key={`${item.ingredientId}-${item.amount}`}>
+                <span>{ingredient?.name ?? "วัตถุดิบ"}</span>
+                <strong>
+                  {item.note ? `${item.note} · ` : ""}
+                  {item.amount} {item.unit}
+                </strong>
+              </div>
+            );
+          })
+        ) : (
+          <p className="empty-text">ยังไม่มีส่วนผสม ใส่เพิ่มได้ในชีตหรือรอบถัดไปในฟอร์มสูตร</p>
+        )}
       </section>
       <section className="detail-section">
         <h3>วิธีทำ</h3>
@@ -359,31 +516,27 @@ function RecipeDetail({
           ))}
         </ol>
       </section>
-      <div className="detail-actions">
-        <button>คำนวณต้นทุนเมนูนี้</button>
-        <button className="primary">บันทึกเป็นเมนูโปรด</button>
-      </div>
     </main>
   );
 }
 
-function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients: Ingredient[]; cost: ReturnType<typeof calculateCost> }) {
+function CostScreen({ recipe, cost }: { recipe: Recipe; ingredients: Ingredient[]; cost: ReturnType<typeof calculateCost> }) {
   const suggested = roundPrice(cost.totalCost / (1 - 0.6));
   return (
     <>
       <TopTitle title="คำนวณต้นทุน" />
       <div className="tabs">
-        <button className="is-active">คำนวณจากสูตร</button>
-        <button>ตั้งราคาขาย</button>
-        <button>สรุปกำไร</button>
+        <button className="is-active" type="button">คำนวณจากสูตร</button>
+        <button type="button">ตั้งราคาขาย</button>
+        <button type="button">สรุปกำไร</button>
       </div>
       <section className="selected-recipe">
-        <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
+        <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
         <div>
           <strong>{recipe.name} (16 oz)</strong>
           <span>ต้นทุนล่าสุดจากสูตร</span>
         </div>
-        <button>เปลี่ยนเมนู</button>
+        <button type="button">เปลี่ยนเมนู</button>
       </section>
       <section className="cost-card">
         <h3>ต้นทุนต่อแก้ว</h3>
@@ -413,7 +566,7 @@ function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients
         <h3>ราคาขายที่แนะนำ</h3>
         <div className="margin-row">
           {[40, 50, 60, 70].map((margin) => (
-            <button className={margin === 60 ? "is-active" : ""} key={margin}>
+            <button className={margin === 60 ? "is-active" : ""} key={margin} type="button">
               {margin}%
             </button>
           ))}
@@ -425,15 +578,27 @@ function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients
   );
 }
 
-function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; onAdd: () => void }) {
+function IngredientsScreen({
+  ingredients,
+  saving,
+  onAdd,
+  onDelete,
+  onEdit
+}: {
+  ingredients: Ingredient[];
+  saving: boolean;
+  onAdd: () => void;
+  onDelete: (id: string) => void;
+  onEdit: (ingredient: Ingredient) => void;
+}) {
   return (
     <>
-      <TopTitle title="วัตถุดิบ" right={<Settings2 size={20} />} />
+      <TopTitle right={<Settings2 size={20} />} title="วัตถุดิบ" />
       <div className="ingredient-tabs">
-        <button className="is-active">ทั้งหมด</button>
-        <button>วัตถุดิบ</button>
-        <button>ท็อปปิ้ง</button>
-        <button onClick={onAdd}>
+        <button className="is-active" type="button">ทั้งหมด</button>
+        <button type="button">วัตถุดิบ</button>
+        <button type="button">ท็อปปิ้ง</button>
+        <button onClick={onAdd} type="button">
           <Plus size={16} /> เพิ่มวัตถุดิบ
         </button>
       </div>
@@ -442,7 +607,7 @@ function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; 
           <span>ชื่อวัตถุดิบ</span>
           <span>ปริมาณที่ซื้อ</span>
           <span>ราคาซื้อ</span>
-          <span>ต้นทุน/หน่วย</span>
+          <span>จัดการ</span>
         </div>
         {ingredients.map((ingredient) => (
           <div className="table-row" key={ingredient.id}>
@@ -451,8 +616,9 @@ function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; 
               {ingredient.buyQty.toLocaleString("th-TH")} {ingredient.buyUnit}
             </span>
             <span>{ingredient.buyPrice.toLocaleString("th-TH")}</span>
-            <span>
-              {ingredient.costPerUnit.toFixed(4)} / {ingredient.baseUnit}
+            <span className="row-actions">
+              <button onClick={() => onEdit(ingredient)} type="button"><Pencil size={14} /></button>
+              <button disabled={saving} onClick={() => onDelete(ingredient.id)} type="button"><Trash2 size={14} /></button>
             </span>
           </div>
         ))}
@@ -461,29 +627,21 @@ function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; 
   );
 }
 
-function FavoritesScreen({
-  recipes,
-  ingredients,
-  onOpen
-}: {
-  recipes: Recipe[];
-  ingredients: Ingredient[];
-  onOpen: (recipe: Recipe) => void;
-}) {
+function FavoritesScreen({ recipes, ingredients, onOpen }: { recipes: Recipe[]; ingredients: Ingredient[]; onOpen: (recipe: Recipe) => void }) {
   return (
     <>
-      <TopTitle title="เมนูโปรด" right={<button className="text-button">แก้ไข</button>} />
+      <TopTitle right={<button className="text-button" type="button">แก้ไข</button>} title="เมนูโปรด" />
       <div className="favorite-list">
         {recipes.map((recipe) => {
           const cost = calculateCost(recipe, ingredients);
           return (
-            <button className="favorite-row" key={recipe.id} onClick={() => onOpen(recipe)}>
-              <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
+            <button className="favorite-row" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
+              <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
               <div>
                 <strong>{recipe.name}</strong>
                 <span>16 oz · ต้นทุน {money(cost.totalCost)} บาท</span>
               </div>
-              <Heart size={20} className="is-favorite" fill="currentColor" />
+              <Heart className="is-favorite" fill="currentColor" size={20} />
             </button>
           );
         })}
@@ -492,27 +650,46 @@ function FavoritesScreen({
   );
 }
 
-function IngredientForm({ onBack, onSubmit }: { onBack: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function IngredientForm({
+  ingredient,
+  message,
+  saving,
+  onBack,
+  onSubmit
+}: {
+  ingredient: Ingredient | null;
+  message: string;
+  saving: boolean;
+  onBack: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
   return (
     <main className="form-screen">
-      <TopTitle title="เพิ่มวัตถุดิบ" left={<ChevronLeft size={24} onClick={onBack} />} />
+      <TopTitle left={<button className="bare-button" onClick={onBack} type="button"><ChevronLeft size={24} /></button>} title={ingredient ? "แก้วัตถุดิบ" : "เพิ่มวัตถุดิบ"} />
       <form className="form-card" onSubmit={onSubmit}>
-        <FormField name="name" label="ชื่อวัตถุดิบ" placeholder="เช่น นมสด" />
+        {message ? <div className="status-banner">{message}</div> : null}
+        <FormField defaultValue={ingredient?.name} label="ชื่อวัตถุดิบ" name="name" placeholder="เช่น นมสด" required />
         <label>
           ประเภท
-          <select name="category" defaultValue="วัตถุดิบน้ำ">
-            <option>วัตถุดิบน้ำ</option>
-            <option>ท็อปปิ้ง</option>
-            <option>บรรจุภัณฑ์</option>
+          <select defaultValue={ingredient?.category || "วัตถุดิบน้ำ"} name="category">
+            {ingredientCategories.map((category) => (
+              <option key={category}>{category}</option>
+            ))}
           </select>
         </label>
-        <FormField name="buyQty" label="ปริมาณที่ซื้อ" placeholder="0" type="number" />
-        <FormField name="buyPrice" label="ราคาซื้อ (บาท)" placeholder="0.00" type="number" />
+        <div className="form-split">
+          <FormField defaultValue={ingredient?.buyQty} label="ปริมาณที่ซื้อ" name="buyQty" placeholder="0" type="number" />
+          <UnitSelect defaultValue={ingredient?.buyUnit || "ml"} label="หน่วยซื้อ" name="buyUnit" />
+        </div>
+        <div className="form-split">
+          <FormField defaultValue={ingredient?.buyPrice} label="ราคาซื้อ (บาท)" name="buyPrice" placeholder="0.00" type="number" />
+          <UnitSelect defaultValue={ingredient?.baseUnit || ingredient?.buyUnit || "ml"} label="หน่วยคิดต้นทุน" name="baseUnit" />
+        </div>
         <label>
           หมายเหตุ
-          <textarea name="note" placeholder="ถ้ามี" />
+          <textarea defaultValue={ingredient?.note || ""} name="note" placeholder="ถ้ามี" />
         </label>
-        <button className="submit-button">บันทึก</button>
+        <button className="submit-button" disabled={saving}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
       </form>
     </main>
   );
@@ -520,47 +697,90 @@ function IngredientForm({ onBack, onSubmit }: { onBack: () => void; onSubmit: (e
 
 function RecipeForm({
   categories,
+  message,
+  recipe,
+  saving,
   onBack,
   onSubmit
 }: {
   categories: Category[];
+  message: string;
+  recipe: Recipe | null;
+  saving: boolean;
   onBack: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <main className="form-screen">
-      <TopTitle title="เพิ่มสูตร" left={<ChevronLeft size={24} onClick={onBack} />} />
+      <TopTitle left={<button className="bare-button" onClick={onBack} type="button"><ChevronLeft size={24} /></button>} title={recipe ? "แก้สูตร" : "เพิ่มสูตร"} />
       <form className="form-card" onSubmit={onSubmit}>
-        <FormField name="name" label="ชื่อเมนู" placeholder="เช่น ชาไทยไข่มุก" />
+        {message ? <div className="status-banner">{message}</div> : null}
+        <FormField defaultValue={recipe?.name} label="ชื่อเมนู" name="name" placeholder="เช่น ชาไทยไข่มุก" required />
         <label>
           หมวดหมู่
-          <select name="categoryId" defaultValue="tea">
+          <select defaultValue={recipe?.categoryId || "tea"} name="categoryId">
             {categories.slice(1).map((category) => (
-              <option value={category.id} key={category.id}>
-                {category.label}
-              </option>
+              <option value={category.id} key={category.id}>{category.label}</option>
             ))}
           </select>
         </label>
-        <div className="upload-box">
+        <label className="upload-box">
           <Package size={22} />
-          <span>อัปโหลดรูปเมนู</span>
-          <small>เวอร์ชัน Apps Script จะส่งรูปเข้า Google Drive</small>
+          <span>{recipe?.imageUrl ? "เปลี่ยนรูปเมนู" : "อัปโหลดรูปเมนู"}</span>
+          <small>รูปจะถูกส่งเข้า Google Drive ผ่าน Apps Script</small>
+          <input accept="image/*" name="image" type="file" />
+        </label>
+        <FormField defaultValue={recipe?.status || ""} label="ป้ายสถานะ" name="status" placeholder="เช่น ขายดี" />
+        <div className="form-split">
+          <FormField defaultValue={recipe?.prepTime || 5} label="เวลาเตรียม (นาที)" name="prepTime" placeholder="5" type="number" />
+          <FormField defaultValue={recipe?.sizeOz || 16} label="ขนาด (oz)" name="sizeOz" placeholder="16" type="number" />
         </div>
-        <FormField name="prepTime" label="เวลาเตรียม (นาที)" placeholder="5" type="number" />
-        <FormField name="sweetness" label="ระดับหวาน (%)" placeholder="75" type="number" />
-        <FormField name="sellingPrice" label="ราคาขาย (บาท)" placeholder="35" type="number" />
-        <button className="submit-button">บันทึกสูตร</button>
+        <div className="form-split">
+          <FormField defaultValue={recipe?.sweetness || 75} label="ระดับหวาน (%)" name="sweetness" placeholder="75" type="number" />
+          <FormField defaultValue={recipe?.sellingPrice || 35} label="ราคาขาย (บาท)" name="sellingPrice" placeholder="35" type="number" />
+        </div>
+        <label>
+          วิธีทำ
+          <textarea defaultValue={recipe?.steps.join("\n") || ""} name="steps" placeholder="หนึ่งบรรทัดต่อหนึ่งขั้นตอน" />
+        </label>
+        <button className="submit-button" disabled={saving}>{saving ? "กำลังบันทึก..." : "บันทึกสูตร"}</button>
       </form>
     </main>
   );
 }
 
-function FormField({ name, label, placeholder, type = "text" }: { name: string; label: string; placeholder: string; type?: string }) {
+function FormField({
+  defaultValue,
+  label,
+  name,
+  placeholder,
+  required,
+  type = "text"
+}: {
+  defaultValue?: number | string;
+  label: string;
+  name: string;
+  placeholder: string;
+  required?: boolean;
+  type?: string;
+}) {
   return (
     <label>
       {label}
-      <input name={name} placeholder={placeholder} type={type} />
+      <input defaultValue={defaultValue} name={name} placeholder={placeholder} required={required} type={type} />
+    </label>
+  );
+}
+
+function UnitSelect({ defaultValue, label, name }: { defaultValue: Unit; label: string; name: string }) {
+  return (
+    <label>
+      {label}
+      <select defaultValue={defaultValue} name={name}>
+        {units.map((unit) => (
+          <option key={unit} value={unit}>{unit}</option>
+        ))}
+      </select>
     </label>
   );
 }
@@ -576,13 +796,13 @@ function BottomNav({ active, onChange, onAdd }: { active: Tab; onChange: (tab: T
   return (
     <nav className="bottom-nav">
       {tabs.slice(0, 2).map((item) => (
-        <NavButton key={item.id} item={item} active={active} onChange={onChange} />
+        <NavButton active={active} item={item} key={item.id} onChange={onChange} />
       ))}
-      <button className="add-button" onClick={onAdd}>
+      <button className="add-button" onClick={onAdd} type="button">
         <Plus size={28} />
       </button>
       {tabs.slice(2).map((item) => (
-        <NavButton key={item.id} item={item} active={active} onChange={onChange} />
+        <NavButton active={active} item={item} key={item.id} onChange={onChange} />
       ))}
     </nav>
   );
@@ -599,7 +819,7 @@ function NavButton({
 }) {
   const Icon = item.icon;
   return (
-    <button className={active === item.id ? "is-active" : ""} onClick={() => onChange(item.id)}>
+    <button className={active === item.id ? "is-active" : ""} onClick={() => onChange(item.id)} type="button">
       <Icon size={20} />
       <span>{item.label}</span>
     </button>
@@ -620,7 +840,7 @@ function SectionTitle({ title, action }: { title: string; action: string }) {
   return (
     <div className="section-title">
       <h2>{title}</h2>
-      <button>
+      <button type="button">
         {action} <ChevronRight size={14} />
       </button>
     </div>
