@@ -11,7 +11,7 @@ export function RecipeCard({ recipe, onOpen }: RecipeCardProps) {
   return (
     <button className="recipe-card" onClick={() => onOpen(recipe)}>
       <div className="recipe-card__image">
-        <DrinkArt imageKey={recipe.imageKey} />
+        <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
         {recipe.status ? <span className="badge badge--hot">{recipe.status}</span> : null}
       </div>
       <div className="recipe-card__body">

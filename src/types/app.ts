@@ -33,7 +33,8 @@ export type Recipe = {
   name: string;
   categoryId: CategoryId;
   imageKey: string;
-  status?: "ขายดี" | "ใหม่";
+  imageUrl?: string;
+  status?: string;
   prepTime: number;
   sweetness: number;
   sizeOz: number;

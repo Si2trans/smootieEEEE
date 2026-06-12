@@ -22,13 +22,14 @@ import {
   Store,
   WalletCards
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import assetPack from "./assets/beverage-asset-pack.png";
 import { DrinkArt } from "./components/DrinkArt";
 import { RecipeCard } from "./components/RecipeCard";
-import { categories, ingredients, recipes as initialRecipes } from "./data/mockData";
+import { categories as mockCategories, ingredients, recipes as initialRecipes } from "./data/mockData";
+import { fetchAppData } from "./lib/appsScriptApi";
 import { calculateCost, money, roundPrice } from "./lib/cost";
-import type { CategoryId, Ingredient, Recipe } from "./types/app";
+import type { Category, CategoryId, Ingredient, Recipe } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "favorites";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
@@ -40,8 +41,32 @@ function App() {
   const [screen, setScreen] = useState<Screen>("main");
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>("all");
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(initialRecipes[0]);
+  const [categoryList, setCategoryList] = useState<Category[]>(mockCategories);
   const [recipes, setRecipes] = useState(initialRecipes);
   const [ingredientList, setIngredientList] = useState(ingredients);
+  const [dataSource, setDataSource] = useState<"loading" | "live" | "fallback">("loading");
+
+  useEffect(() => {
+    let ignore = false;
+
+    fetchAppData()
+      .then((data) => {
+        if (ignore) return;
+        setCategoryList(data.categories);
+        setIngredientList(data.ingredients);
+        setRecipes(data.recipes);
+        setSelectedRecipe(data.recipes[0] || initialRecipes[0]);
+        setDataSource("live");
+      })
+      .catch((error) => {
+        console.warn(error);
+        if (!ignore) setDataSource("fallback");
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);
@@ -113,14 +138,15 @@ function App() {
         ) : screen === "ingredientForm" ? (
           <IngredientForm onBack={() => setScreen("main")} onSubmit={addIngredient} />
         ) : screen === "recipeForm" ? (
-          <RecipeForm onBack={() => setScreen("main")} onSubmit={addRecipe} />
+          <RecipeForm categories={categoryList} onBack={() => setScreen("main")} onSubmit={addRecipe} />
         ) : (
           <>
             <main className="content">
               {tab === "home" ? (
-                <HomeScreen favoriteRecipes={favoriteRecipes} onOpen={openRecipe} />
+                <HomeScreen categories={categoryList} favoriteRecipes={favoriteRecipes} onOpen={openRecipe} dataSource={dataSource} />
               ) : tab === "recipes" ? (
                 <RecipesScreen
+                  categories={categoryList}
                   selectedCategory={selectedCategory}
                   onCategory={setSelectedCategory}
                   recipes={filteredRecipes}
@@ -131,7 +157,7 @@ function App() {
               ) : tab === "ingredients" ? (
                 <IngredientsScreen ingredients={ingredientList} onAdd={() => setScreen("ingredientForm")} />
               ) : (
-                <FavoritesScreen recipes={favoriteRecipes} onOpen={openRecipe} />
+                <FavoritesScreen recipes={favoriteRecipes} ingredients={ingredientList} onOpen={openRecipe} />
               )}
             </main>
             <BottomNav active={tab} onChange={setTab} onAdd={() => setScreen("recipeForm")} />
@@ -147,7 +173,17 @@ function App() {
   );
 }
 
-function HomeScreen({ favoriteRecipes, onOpen }: { favoriteRecipes: Recipe[]; onOpen: (recipe: Recipe) => void }) {
+function HomeScreen({
+  categories,
+  favoriteRecipes,
+  onOpen,
+  dataSource
+}: {
+  categories: Category[];
+  favoriteRecipes: Recipe[];
+  onOpen: (recipe: Recipe) => void;
+  dataSource: "loading" | "live" | "fallback";
+}) {
   return (
     <>
       <header className="home-header">
@@ -165,6 +201,9 @@ function HomeScreen({ favoriteRecipes, onOpen }: { favoriteRecipes: Recipe[]; on
         <button className="icon-button">
           <SlidersHorizontal size={19} />
         </button>
+      </div>
+      <div className={`data-source data-source--${dataSource}`}>
+        {dataSource === "live" ? "Google Sheet connected" : dataSource === "loading" ? "Loading Google Sheet..." : "Using offline sample data"}
       </div>
       <section className="quick-grid">
         <button className="quick-card quick-card--green">
@@ -202,7 +241,7 @@ function HomeScreen({ favoriteRecipes, onOpen }: { favoriteRecipes: Recipe[]; on
       <div className="horizontal-cards">
         {favoriteRecipes.map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)}>
-            <DrinkArt imageKey={recipe.imageKey} compact />
+            <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
             <strong>{recipe.name}</strong>
             <span>
               <Star size={12} fill="currentColor" /> {recipe.rating}
@@ -215,11 +254,13 @@ function HomeScreen({ favoriteRecipes, onOpen }: { favoriteRecipes: Recipe[]; on
 }
 
 function RecipesScreen({
+  categories,
   selectedCategory,
   onCategory,
   recipes,
   onOpen
 }: {
+  categories: Category[];
   selectedCategory: CategoryId;
   onCategory: (category: CategoryId) => void;
   recipes: Recipe[];
@@ -285,7 +326,7 @@ function RecipeDetail({
         </button>
       </div>
       <div className="detail-hero">
-        <DrinkArt imageKey={recipe.imageKey} />
+        <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
         {recipe.status ? <span className="badge badge--hot">{recipe.status}</span> : null}
         <span className="time-pill">{recipe.prepTime} นาที</span>
       </div>
@@ -344,7 +385,7 @@ function CostScreen({ recipe, ingredients, cost }: { recipe: Recipe; ingredients
         <button>สรุปกำไร</button>
       </div>
       <section className="selected-recipe">
-        <DrinkArt imageKey={recipe.imageKey} compact />
+        <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
         <div>
           <strong>{recipe.name} (16 oz)</strong>
           <span>ต้นทุนล่าสุดจากสูตร</span>
@@ -425,7 +466,15 @@ function IngredientsScreen({ ingredients, onAdd }: { ingredients: Ingredient[]; 
   );
 }
 
-function FavoritesScreen({ recipes, onOpen }: { recipes: Recipe[]; onOpen: (recipe: Recipe) => void }) {
+function FavoritesScreen({
+  recipes,
+  ingredients,
+  onOpen
+}: {
+  recipes: Recipe[];
+  ingredients: Ingredient[];
+  onOpen: (recipe: Recipe) => void;
+}) {
   return (
     <>
       <TopTitle title="เมนูโปรด" right={<button className="text-button">แก้ไข</button>} />
@@ -434,7 +483,7 @@ function FavoritesScreen({ recipes, onOpen }: { recipes: Recipe[]; onOpen: (reci
           const cost = calculateCost(recipe, ingredients);
           return (
             <button className="favorite-row" key={recipe.id} onClick={() => onOpen(recipe)}>
-              <DrinkArt imageKey={recipe.imageKey} compact />
+              <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} compact />
               <div>
                 <strong>{recipe.name}</strong>
                 <span>16 oz · ต้นทุน {money(cost.totalCost)} บาท</span>
@@ -474,7 +523,15 @@ function IngredientForm({ onBack, onSubmit }: { onBack: () => void; onSubmit: (e
   );
 }
 
-function RecipeForm({ onBack, onSubmit }: { onBack: () => void; onSubmit: (event: React.FormEvent<HTMLFormElement>) => void }) {
+function RecipeForm({
+  categories,
+  onBack,
+  onSubmit
+}: {
+  categories: Category[];
+  onBack: () => void;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
   return (
     <main className="form-screen">
       <TopTitle title="เพิ่มสูตร" left={<ChevronLeft size={24} onClick={onBack} />} />
