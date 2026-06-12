@@ -38,6 +38,7 @@ type SaveRecipeInput = {
   favorite?: boolean;
   rating?: number;
   steps?: string[];
+  items?: RecipeItem[];
 };
 
 type UploadImageInput = {
@@ -133,7 +134,12 @@ export async function saveRecipe(input: SaveRecipeInput) {
       steps: (input.steps || []).filter(Boolean).join("|"),
       active: true
     },
-    items: []
+    items: (input.items || []).map((item) => ({
+      ingredient_id: item.ingredientId,
+      amount: Number(item.amount || 0),
+      unit: item.unit,
+      note: item.note || ""
+    }))
   });
 }
 

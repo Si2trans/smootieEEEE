@@ -42,7 +42,7 @@ import {
   uploadRecipeImage
 } from "./lib/appsScriptApi";
 import { calculateCost, money, roundPrice } from "./lib/cost";
-import type { Category, CategoryId, Ingredient, Recipe, Unit } from "./types/app";
+import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "favorites";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
@@ -54,9 +54,9 @@ const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
 const units: Unit[] = ["ml", "g", "piece"];
 const deliveryPlatforms = [
-  { id: "lineman", name: "LINE MAN", fee: 30, icon: "/platform-lineman.svg" },
-  { id: "grab", name: "Grab", fee: 32, icon: "/platform-grab.svg" },
-  { id: "shopeefood", name: "ShopeeFood", fee: 30, icon: "/platform-shopeefood.svg" }
+  { id: "lineman", name: "LINE MAN", fee: 30, icon: "/LINEMAN.png" },
+  { id: "grab", name: "Grab", fee: 32, icon: "/GRAB.png" },
+  { id: "shopeefood", name: "ShopeeFood", fee: 30, icon: "/SHOPEE_FOOD.png" }
 ];
 
 function App() {
@@ -202,6 +202,18 @@ function App() {
         imageFileId = uploaded.file_id;
       }
       const recipeId = editingRecipe?.id || `rec_${Date.now()}`;
+      const itemIngredientIds = form.getAll("itemIngredientId").map(String);
+      const itemAmounts = form.getAll("itemAmount").map((value) => Number(value || 0));
+      const itemUnits = form.getAll("itemUnit").map(String);
+      const itemNotes = form.getAll("itemNote").map(String);
+      const items: RecipeItem[] = itemIngredientIds
+        .map((ingredientId, index) => ({
+          ingredientId,
+          amount: itemAmounts[index] || 0,
+          unit: (itemUnits[index] || "ml") as Unit,
+          note: itemNotes[index] || ""
+        }))
+        .filter((item) => item.ingredientId && item.amount > 0);
       await saveRecipe({
         id: recipeId,
         name: String(form.get("name") || "สูตรใหม่"),
@@ -218,7 +230,8 @@ function App() {
         steps: String(form.get("steps") || "")
           .split("\n")
           .map((step) => step.trim())
-          .filter(Boolean)
+          .filter(Boolean),
+        items
       });
       await refreshData(recipeId);
       setEditingRecipe(null);
@@ -308,6 +321,7 @@ function App() {
         ) : screen === "recipeForm" ? (
           <RecipeForm
             categories={categoryList}
+            ingredients={ingredientList}
             message={message}
             recipe={editingRecipe}
             saving={saving}
@@ -633,9 +647,11 @@ function CostScreen({
   onMargin: (margin: number) => void;
 }) {
   const suggested = roundPrice(cost.totalCost / (1 - targetMargin / 100));
-  const platformFeeAmount = (recipe.sellingPrice * deliveryFee) / 100;
-  const deliveryProfit = recipe.sellingPrice - platformFeeAmount - cost.totalCost;
-  const deliveryMargin = recipe.sellingPrice > 0 ? (deliveryProfit / recipe.sellingPrice) * 100 : 0;
+  const deliveryPrice = deliveryFee >= 100 ? 0 : roundPrice(recipe.sellingPrice / (1 - deliveryFee / 100));
+  const platformFeeAmount = (deliveryPrice * deliveryFee) / 100;
+  const deliveryNetRevenue = deliveryPrice - platformFeeAmount;
+  const deliveryProfit = deliveryNetRevenue - cost.totalCost;
+  const deliveryMargin = deliveryPrice > 0 ? (deliveryProfit / deliveryPrice) * 100 : 0;
   return (
     <>
       <TopTitle title="คำนวณต้นทุน" />
@@ -707,7 +723,12 @@ function CostScreen({
               />
             </label>
             <CostLine label="ค่าธรรมเนียมแพลตฟอร์ม" value={platformFeeAmount} />
+            <CostLine label="รายรับหลังหัก" value={deliveryNetRevenue} />
             <div className="total-line">
+              <span>ราคาขายบนเดลิเวอรี่</span>
+              <strong>{money(deliveryPrice)} บาท</strong>
+            </div>
+            <div className="total-line total-line--plain">
               <span>กำไรหลังหักเดลิเวอรี่</span>
               <strong>{money(deliveryProfit)} บาท</strong>
             </div>
@@ -878,6 +899,7 @@ function IngredientForm({
 
 function RecipeForm({
   categories,
+  ingredients,
   message,
   recipe,
   saving,
@@ -885,12 +907,29 @@ function RecipeForm({
   onSubmit
 }: {
   categories: Category[];
+  ingredients: Ingredient[];
   message: string;
   recipe: Recipe | null;
   saving: boolean;
   onBack: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [items, setItems] = useState<RecipeItem[]>(
+    recipe?.items.length ? recipe.items : [{ ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }]
+  );
+
+  function updateItem(index: number, item: RecipeItem) {
+    setItems((current) => current.map((row, rowIndex) => (rowIndex === index ? item : row)));
+  }
+
+  function addItem() {
+    setItems((current) => [...current, { ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }]);
+  }
+
+  function removeItem(index: number) {
+    setItems((current) => (current.length <= 1 ? current : current.filter((_, rowIndex) => rowIndex !== index)));
+  }
+
   return (
     <main className="form-screen">
       <TopTitle left={<button className="bare-button" onClick={onBack} type="button"><ChevronLeft size={24} /></button>} title={recipe ? "แก้สูตร" : "เพิ่มสูตร"} />
@@ -913,6 +952,21 @@ function RecipeForm({
         </label>
         <FormField defaultValue={recipe?.status || ""} label="ป้ายสถานะ" name="status" placeholder="เช่น ขายดี" />
         <FormField defaultValue={recipe?.sellingPrice || 35} label="ราคาขาย (บาท)" name="sellingPrice" placeholder="35" type="number" />
+        <section className="recipe-items-editor">
+          <div className="form-section-title">
+            <h3>ส่วนผสมในสูตร</h3>
+            <button onClick={addItem} type="button"><Plus size={15} /> เพิ่ม</button>
+          </div>
+          {items.map((item, index) => (
+            <RecipeItemEditor
+              ingredientList={ingredients}
+              item={item}
+              key={`${item.ingredientId}-${index}`}
+              onChange={(nextItem) => updateItem(index, nextItem)}
+              onRemove={() => removeItem(index)}
+            />
+          ))}
+        </section>
         <label>
           วิธีทำ
           <textarea defaultValue={recipe?.steps.join("\n") || ""} name="steps" placeholder="หนึ่งบรรทัดต่อหนึ่งขั้นตอน" />
@@ -920,6 +974,74 @@ function RecipeForm({
         <button className="submit-button" disabled={saving}>{saving ? "กำลังบันทึก..." : "บันทึกสูตร"}</button>
       </form>
     </main>
+  );
+}
+
+function RecipeItemEditor({
+  ingredientList,
+  item,
+  onChange,
+  onRemove
+}: {
+  ingredientList: Ingredient[];
+  item: RecipeItem;
+  onChange: (item: RecipeItem) => void;
+  onRemove: () => void;
+}) {
+  const selectedIngredient = ingredientList.find((ingredient) => ingredient.id === item.ingredientId);
+  return (
+    <div className="recipe-item-editor">
+      <label>
+        วัตถุดิบ
+        <select
+          name="itemIngredientId"
+          onChange={(event) => {
+            const ingredient = ingredientList.find((row) => row.id === event.currentTarget.value);
+            onChange({ ...item, ingredientId: event.currentTarget.value, unit: ingredient?.baseUnit || item.unit });
+          }}
+          value={item.ingredientId}
+        >
+          {ingredientList.map((ingredient) => (
+            <option key={ingredient.id} value={ingredient.id}>
+              {ingredient.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="recipe-item-editor__grid">
+        <label>
+          ปริมาณ
+          <input
+            min="0"
+            name="itemAmount"
+            onChange={(event) => onChange({ ...item, amount: Number(event.currentTarget.value || 0) })}
+            step="0.01"
+            type="number"
+            value={item.amount || ""}
+          />
+        </label>
+        <label>
+          หน่วย
+          <select name="itemUnit" onChange={(event) => onChange({ ...item, unit: event.currentTarget.value as Unit })} value={item.unit}>
+            {units.map((unit) => (
+              <option key={unit} value={unit}>{unit}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label>
+        หมายเหตุ
+        <input
+          name="itemNote"
+          onChange={(event) => onChange({ ...item, note: event.currentTarget.value })}
+          placeholder={selectedIngredient ? `เช่น ${selectedIngredient.buyQty} ${selectedIngredient.buyUnit}` : "ถ้ามี"}
+          value={item.note || ""}
+        />
+      </label>
+      <button className="remove-line-button" onClick={onRemove} type="button">
+        <Trash2 size={14} /> ลบส่วนผสมนี้
+      </button>
+    </div>
   );
 }
 

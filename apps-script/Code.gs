@@ -225,7 +225,8 @@ function saveRecipe(payload) {
   if (!recipe.created_at) recipe.created_at = new Date().toISOString();
   recipe.updated_at = new Date().toISOString();
   const saved = saveObject(SHEETS.recipes, recipe);
-  if (payload.items && payload.items.length) {
+  if (Array.isArray(payload.items)) {
+    deleteRecipeItems(recipe.id);
     payload.items.forEach((item, index) => {
       item.id = item.id || "ritem_" + Date.now() + "_" + index;
       item.recipe_id = recipe.id;
