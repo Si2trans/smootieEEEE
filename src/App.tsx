@@ -971,12 +971,15 @@ function RecipeItemEditor({
   const selectedIngredient = ingredientList.find((ingredient) => ingredient.id === item.ingredientId);
   const [ingredientQuery, setIngredientQuery] = useState(selectedIngredient?.name || "");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [isTypingIngredient, setIsTypingIngredient] = useState(false);
+  const ingredientKeyword = isTypingIngredient ? ingredientQuery.trim().toLowerCase() : "";
   const filteredIngredients = ingredientList
-    .filter((ingredient) => ingredient.name.toLowerCase().includes(ingredientQuery.trim().toLowerCase()))
+    .filter((ingredient) => !ingredientKeyword || ingredient.name.toLowerCase().includes(ingredientKeyword))
     .slice(0, 8);
 
   function chooseIngredient(ingredient: Ingredient) {
     setIngredientQuery(ingredient.name);
+    setIsTypingIngredient(false);
     setIsPickerOpen(false);
     onChange({ ...item, ingredientId: ingredient.id, unit: ingredient.baseUnit || item.unit });
   }
@@ -991,9 +994,13 @@ function RecipeItemEditor({
             onBlur={() => window.setTimeout(() => setIsPickerOpen(false), 120)}
             onChange={(event) => {
               setIngredientQuery(event.currentTarget.value);
+              setIsTypingIngredient(true);
               setIsPickerOpen(true);
             }}
-            onFocus={() => setIsPickerOpen(true)}
+            onFocus={() => {
+              setIsTypingIngredient(false);
+              setIsPickerOpen(true);
+            }}
             placeholder="พิมพ์เพื่อค้นหาวัตถุดิบ"
             value={ingredientQuery}
           />
