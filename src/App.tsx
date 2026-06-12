@@ -35,6 +35,7 @@ import {
   deleteRecipe,
   fetchAppData,
   fileToImagePayload,
+  getCachedAppData,
   saveIngredient,
   saveRecipe,
   toggleFavoriteRemote,
@@ -51,20 +52,26 @@ const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อป
 const units: Unit[] = ["ml", "g", "piece"];
 
 function App() {
+  const [cachedData] = useState(() => getCachedAppData());
   const [tab, setTab] = useState<Tab>("home");
   const [screen, setScreen] = useState<Screen>("main");
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>("all");
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(mockRecipes[0]);
-  const [categoryList, setCategoryList] = useState<Category[]>(mockCategories);
-  const [recipes, setRecipes] = useState<Recipe[]>(mockRecipes);
-  const [ingredientList, setIngredientList] = useState<Ingredient[]>(mockIngredients);
+  const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(cachedData?.recipes[0] || mockRecipes[0]);
+  const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || mockCategories);
+  const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || mockRecipes);
+  const [ingredientList, setIngredientList] = useState<Ingredient[]>(cachedData?.ingredients || mockIngredients);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedData);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    if (cachedData) {
+      setLoading(false);
+      return;
+    }
+
     let ignore = false;
     fetchAppData()
       .then((data) => {
@@ -82,8 +89,7 @@ function App() {
     return () => {
       ignore = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cachedData]);
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);

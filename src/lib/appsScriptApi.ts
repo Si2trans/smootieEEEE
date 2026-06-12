@@ -5,6 +5,7 @@ const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
 
 export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
+const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v1";
 
 type BootstrapResponse = {
   ok?: boolean;
@@ -64,7 +65,36 @@ export async function fetchAppData(): Promise<AppData> {
     throw new Error("Apps Script returned ok=false");
   }
 
-  return normalizeBootstrapData(data);
+  const normalized = normalizeBootstrapData(data);
+  cacheAppData(normalized);
+  return normalized;
+}
+
+export function getCachedAppData(): AppData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(APP_DATA_CACHE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as AppData;
+    if (!Array.isArray(data.categories) || !Array.isArray(data.ingredients) || !Array.isArray(data.recipes)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheAppData(data: AppData) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage can be unavailable in private mode or when quota is full.
+  }
+}
+
+export function clearCachedAppData() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(APP_DATA_CACHE_KEY);
 }
 
 export async function saveIngredient(input: SaveIngredientInput) {
