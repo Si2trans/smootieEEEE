@@ -48,10 +48,9 @@ button:focus-visible {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(360px, 430px) minmax(260px, 360px);
+  grid-template-columns: minmax(360px, 430px);
   justify-content: center;
   align-items: center;
-  gap: 28px;
   padding: 28px;
 }
 
@@ -177,11 +176,19 @@ p {
   min-height: 142px;
   border-radius: 17px;
   padding: 16px 12px;
-  display: grid;
-  grid-template-columns: 1fr 74px;
+  display: block;
   overflow: hidden;
   text-align: left;
   position: relative;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.quick-card > div {
+  position: relative;
+  z-index: 1;
+  max-width: 62%;
 }
 
 .quick-card h3 {
@@ -205,7 +212,7 @@ p {
 }
 
 .quick-card--green {
-  background: linear-gradient(135deg, #eef9dd, #dcefc7);
+  background-color: #e7f5d8;
 }
 
 .quick-card--green span {
@@ -213,17 +220,11 @@ p {
 }
 
 .quick-card--orange {
-  background: linear-gradient(135deg, #fff0e5, #ffe0cc);
+  background-color: #ffe6d6;
 }
 
 .quick-card--orange span {
   background: var(--orange);
-}
-
-.quick-card--orange svg {
-  align-self: end;
-  color: #5c361e;
-  transform: rotate(-10deg);
 }
 
 .section-title {
@@ -1044,33 +1045,6 @@ p {
   font-size: 11px;
 }
 
-.build-note {
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 22px;
-  padding: 16px;
-  box-shadow: var(--shadow);
-}
-
-.build-note img {
-  width: 100%;
-  aspect-ratio: 1.2;
-  object-fit: cover;
-  border-radius: 16px;
-  display: block;
-}
-
-.build-note h2 {
-  margin-top: 14px;
-  font-size: 22px;
-}
-
-.build-note p {
-  color: var(--muted);
-  line-height: 1.5;
-  margin-top: 7px;
-}
-
 @media (max-width: 860px) {
   .app-shell {
     display: block;
@@ -1087,7 +1061,4 @@ p {
     border: 0;
   }
 
-  .build-note {
-    display: none;
-  }
 }
