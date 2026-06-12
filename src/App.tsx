@@ -969,15 +969,15 @@ function RecipeItemEditor({
   onRemove: () => void;
 }) {
   const selectedIngredient = ingredientList.find((ingredient) => ingredient.id === item.ingredientId);
-  const inputId = `ingredient-options-${item.ingredientId || "new"}`;
-  const ingredientName = selectedIngredient?.name || "";
+  const [ingredientQuery, setIngredientQuery] = useState(selectedIngredient?.name || "");
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const filteredIngredients = ingredientList
+    .filter((ingredient) => ingredient.name.toLowerCase().includes(ingredientQuery.trim().toLowerCase()))
+    .slice(0, 8);
 
-  function chooseIngredient(value: string) {
-    const normalized = value.trim().toLowerCase();
-    const ingredient =
-      ingredientList.find((row) => row.name.trim().toLowerCase() === normalized) ||
-      ingredientList.find((row) => row.name.toLowerCase().includes(normalized));
-    if (!ingredient) return;
+  function chooseIngredient(ingredient: Ingredient) {
+    setIngredientQuery(ingredient.name);
+    setIsPickerOpen(false);
     onChange({ ...item, ingredientId: ingredient.id, unit: ingredient.baseUnit || item.unit });
   }
 
@@ -985,20 +985,34 @@ function RecipeItemEditor({
     <div className="recipe-item-editor">
       <label>
         วัตถุดิบ
-        <input
-          defaultValue={ingredientName}
-          list={inputId}
-          name="itemIngredientName"
-          onBlur={(event) => chooseIngredient(event.currentTarget.value)}
-          onChange={(event) => chooseIngredient(event.currentTarget.value)}
-          placeholder="พิมพ์ชื่อวัตถุดิบหรือเลือกจากรายการ"
-        />
-        <input name="itemIngredientId" type="hidden" value={item.ingredientId} />
-        <datalist id={inputId}>
-          {ingredientList.map((ingredient) => (
-            <option key={ingredient.id} value={ingredient.name} />
-          ))}
-        </datalist>
+        <div className="ingredient-combobox">
+          <input
+            name="itemIngredientName"
+            onBlur={() => window.setTimeout(() => setIsPickerOpen(false), 120)}
+            onChange={(event) => {
+              setIngredientQuery(event.currentTarget.value);
+              setIsPickerOpen(true);
+            }}
+            onFocus={() => setIsPickerOpen(true)}
+            placeholder="พิมพ์เพื่อค้นหาวัตถุดิบ"
+            value={ingredientQuery}
+          />
+          <input name="itemIngredientId" type="hidden" value={item.ingredientId} />
+          {isPickerOpen ? (
+            <div className="ingredient-options">
+              {filteredIngredients.length ? (
+                filteredIngredients.map((ingredient) => (
+                  <button key={ingredient.id} onMouseDown={() => chooseIngredient(ingredient)} type="button">
+                    <span>{ingredient.name}</span>
+                    <small>{ingredient.category}</small>
+                  </button>
+                ))
+              ) : (
+                <div className="ingredient-options__empty">ไม่พบวัตถุดิบ</div>
+              )}
+            </div>
+          ) : null}
+        </div>
       </label>
       <div className="recipe-item-editor__grid">
         <label>
