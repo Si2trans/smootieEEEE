@@ -236,7 +236,7 @@ function normalizeRecipes(
       const id = text(row.id);
       const name = text(row.name);
       const category = categoryId(row.category_id || row.categoryId);
-      const imageUrl = text(row.image_url || row.imageUrl);
+      const imageUrl = normalizeDriveImageUrl(text(row.image_url || row.imageUrl));
       return {
         id,
         name,
@@ -280,6 +280,15 @@ function splitSteps(value: unknown) {
     .map((step) => step.trim())
     .filter(Boolean);
   return steps.length ? steps : ["เพิ่มวิธีทำใน Google Sheet"];
+}
+
+function normalizeDriveImageUrl(value: string) {
+  if (!value) return "";
+  const fileId =
+    /[?&]id=([^&]+)/.exec(value)?.[1] ||
+    /\/file\/d\/([^/]+)/.exec(value)?.[1] ||
+    /\/d\/([^/]+)/.exec(value)?.[1];
+  return fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200` : value;
 }
 
 function inferImageKey(name: string, category: CategoryId) {

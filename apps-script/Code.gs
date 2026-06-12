@@ -329,7 +329,7 @@ function uploadRecipeImage(payload) {
   return {
     ok: true,
     file_id: file.getId(),
-    image_url: "https://drive.google.com/uc?export=view&id=" + file.getId()
+    image_url: "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w1200"
   };
 }
 

@@ -61,6 +61,7 @@ function App() {
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -69,10 +70,13 @@ function App() {
       .then((data) => {
         if (ignore) return;
         applyData(data, selectedRecipe.id);
+        setLoading(false);
       })
       .catch((error) => {
+        if (ignore) return;
         console.warn(error);
         setMessage("ยังต่อ Google Sheet ไม่ได้ เลยแสดงข้อมูลตัวอย่างก่อน");
+        setLoading(false);
       });
 
     return () => {
@@ -282,7 +286,9 @@ function App() {
           <>
             <main className="content">
               {message ? <div className="status-banner">{message}</div> : null}
-              {tab === "home" ? (
+              {loading ? (
+                <LoadingScreen />
+              ) : tab === "home" ? (
                 <HomeScreen categories={categoryList} favoriteRecipes={favoriteRecipes} onNavigate={setTab} onOpen={openRecipe} />
               ) : tab === "recipes" ? (
                 <RecipesScreen
@@ -386,6 +392,18 @@ function HomeScreen({
         ))}
       </div>
     </>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <section className="loading-state">
+      <div className="loading-state__icon">
+        <CupSoda size={34} />
+      </div>
+      <h1>กำลังโหลดข้อมูลร้าน</h1>
+      <p>ดึงสูตร วัตถุดิบ และรูปเมนูจาก Google Sheet</p>
+    </section>
   );
 }
 
