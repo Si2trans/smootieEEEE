@@ -199,16 +199,24 @@ function App() {
       }
       const recipeId = editingRecipe?.id || `rec_${Date.now()}`;
       const itemIngredientIds = form.getAll("itemIngredientId").map(String);
+      const itemIngredientNames = form.getAll("itemIngredientName").map(String);
       const itemAmounts = form.getAll("itemAmount").map((value) => Number(value || 0));
       const itemUnits = form.getAll("itemUnit").map(String);
       const itemNotes = form.getAll("itemNote").map(String);
       const items: RecipeItem[] = itemIngredientIds
-        .map((ingredientId, index) => ({
-          ingredientId,
-          amount: itemAmounts[index] || 0,
-          unit: (itemUnits[index] || "ml") as Unit,
-          note: itemNotes[index] || ""
-        }))
+        .map((ingredientId, index) => {
+          const typedName = itemIngredientNames[index]?.trim().toLowerCase() || "";
+          const ingredient =
+            ingredientList.find((row) => row.id === ingredientId) ||
+            ingredientList.find((row) => row.name.trim().toLowerCase() === typedName) ||
+            ingredientList.find((row) => typedName && row.name.toLowerCase().includes(typedName));
+          return {
+            ingredientId: ingredient?.id || ingredientId,
+            amount: itemAmounts[index] || 0,
+            unit: (itemUnits[index] || ingredient?.baseUnit || "ml") as Unit,
+            note: itemNotes[index] || ""
+          };
+        })
         .filter((item) => item.ingredientId && item.amount > 0);
       const savedRecipe: Recipe = {
         id: recipeId,
@@ -961,24 +969,36 @@ function RecipeItemEditor({
   onRemove: () => void;
 }) {
   const selectedIngredient = ingredientList.find((ingredient) => ingredient.id === item.ingredientId);
+  const inputId = `ingredient-options-${item.ingredientId || "new"}`;
+  const ingredientName = selectedIngredient?.name || "";
+
+  function chooseIngredient(value: string) {
+    const normalized = value.trim().toLowerCase();
+    const ingredient =
+      ingredientList.find((row) => row.name.trim().toLowerCase() === normalized) ||
+      ingredientList.find((row) => row.name.toLowerCase().includes(normalized));
+    if (!ingredient) return;
+    onChange({ ...item, ingredientId: ingredient.id, unit: ingredient.baseUnit || item.unit });
+  }
+
   return (
     <div className="recipe-item-editor">
       <label>
         วัตถุดิบ
-        <select
-          name="itemIngredientId"
-          onChange={(event) => {
-            const ingredient = ingredientList.find((row) => row.id === event.currentTarget.value);
-            onChange({ ...item, ingredientId: event.currentTarget.value, unit: ingredient?.baseUnit || item.unit });
-          }}
-          value={item.ingredientId}
-        >
+        <input
+          defaultValue={ingredientName}
+          list={inputId}
+          name="itemIngredientName"
+          onBlur={(event) => chooseIngredient(event.currentTarget.value)}
+          onChange={(event) => chooseIngredient(event.currentTarget.value)}
+          placeholder="พิมพ์ชื่อวัตถุดิบหรือเลือกจากรายการ"
+        />
+        <input name="itemIngredientId" type="hidden" value={item.ingredientId} />
+        <datalist id={inputId}>
           {ingredientList.map((ingredient) => (
-            <option key={ingredient.id} value={ingredient.id}>
-              {ingredient.name}
-            </option>
+            <option key={ingredient.id} value={ingredient.name} />
           ))}
-        </select>
+        </datalist>
       </label>
       <div className="recipe-item-editor__grid">
         <label>
