@@ -222,6 +222,8 @@ function getRecipe(id) {
 function saveRecipe(payload) {
   const recipe = payload.recipe || payload;
   if (!recipe.id) recipe.id = "rec_" + Date.now();
+  recipe.id = cleanId(recipe.id);
+  dedupeObjectsById(SHEETS.recipes, recipe.id);
   if (!recipe.created_at) recipe.created_at = new Date().toISOString();
   recipe.updated_at = new Date().toISOString();
   const saved = saveObject(SHEETS.recipes, recipe);
@@ -238,6 +240,7 @@ function saveRecipe(payload) {
 }
 
 function deleteRecipe(recipeId) {
+  recipeId = cleanId(recipeId);
   const sheet = getSheet(SHEETS.recipes);
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
@@ -247,7 +250,7 @@ function deleteRecipe(recipeId) {
   if (!recipeId) throw new Error("Missing recipe id.");
 
   for (let row = 1; row < values.length; row++) {
-    if (values[row][idIndex] === recipeId) {
+    if (cleanId(values[row][idIndex]) === recipeId) {
       if (activeIndex >= 0) {
         sheet.getRange(row + 1, activeIndex + 1).setValue(false);
         if (updatedIndex >= 0) sheet.getRange(row + 1, updatedIndex + 1).setValue(new Date().toISOString());
@@ -263,32 +266,35 @@ function deleteRecipe(recipeId) {
 }
 
 function deleteRecipeItems(recipeId) {
+  recipeId = cleanId(recipeId);
   const sheet = getSheet(SHEETS.recipeItems);
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
   const recipeIndex = headers.indexOf("recipe_id");
   for (let row = values.length - 1; row >= 1; row--) {
-    if (values[row][recipeIndex] === recipeId) sheet.deleteRow(row + 1);
+    if (cleanId(values[row][recipeIndex]) === recipeId) sheet.deleteRow(row + 1);
   }
 }
 
 function removeFavorite(recipeId) {
+  recipeId = cleanId(recipeId);
   const sheet = getSheet(SHEETS.favorites);
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
   const recipeIndex = headers.indexOf("recipe_id");
   for (let row = values.length - 1; row >= 1; row--) {
-    if (values[row][recipeIndex] === recipeId) sheet.deleteRow(row + 1);
+    if (cleanId(values[row][recipeIndex]) === recipeId) sheet.deleteRow(row + 1);
   }
 }
 
 function toggleFavorite(recipeId) {
+  recipeId = cleanId(recipeId);
   const sheet = getSheet(SHEETS.favorites);
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
   const recipeIndex = headers.indexOf("recipe_id");
   for (let row = 1; row < rows.length; row++) {
-    if (rows[row][recipeIndex] === recipeId) {
+    if (cleanId(rows[row][recipeIndex]) === recipeId) {
       sheet.deleteRow(row + 1);
       return { ok: true, favorite: false };
     }
@@ -361,8 +367,9 @@ function saveObject(sheetName, object) {
   const headers = values[0];
   const idIndex = headers.indexOf("id");
   if (!object.id) object.id = "id_" + Date.now();
+  object.id = cleanId(object.id);
   for (let row = 1; row < values.length; row++) {
-    if (values[row][idIndex] === object.id) {
+    if (cleanId(values[row][idIndex]) === object.id) {
       headers.forEach((header, index) => sheet.getRange(row + 1, index + 1).setValue(cellValue(object, header)));
       return { ok: true, item: object, mode: "updated" };
     }
@@ -376,13 +383,14 @@ function appendObject(sheet, headers, object) {
 }
 
 function deleteObject(sheetName, id) {
+  id = cleanId(id);
   if (!id) throw new Error("Missing id.");
   const sheet = getSheet(sheetName);
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
   const idIndex = headers.indexOf("id");
   for (let row = 1; row < values.length; row++) {
-    if (values[row][idIndex] === id) {
+    if (cleanId(values[row][idIndex]) === id) {
       sheet.deleteRow(row + 1);
       return { ok: true, id: id, mode: "deleted" };
     }
@@ -392,6 +400,28 @@ function deleteObject(sheetName, id) {
 
 function cellValue(object, header) {
   return object[header] === undefined || object[header] === null ? "" : object[header];
+}
+
+function cleanId(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function dedupeObjectsById(sheetName, id) {
+  id = cleanId(id);
+  if (!id) return;
+  const sheet = getSheet(sheetName);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idIndex = headers.indexOf("id");
+  let found = false;
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (cleanId(values[row][idIndex]) !== id) continue;
+    if (!found) {
+      found = true;
+      continue;
+    }
+    sheet.deleteRow(row + 1);
+  }
 }
 
 function getSheet(name) {

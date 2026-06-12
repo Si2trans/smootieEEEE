@@ -226,7 +226,7 @@ function normalizeBootstrapData(data: BootstrapResponse): AppData {
   const ingredients = normalizeIngredients(data.ingredients || []);
   const itemsByRecipe = groupRecipeItems(data.recipeItems || []);
   const favorites = new Set((data.favorites || []).map((item) => text(item.recipe_id)));
-  const recipes = normalizeRecipes(data.recipes || [], itemsByRecipe, favorites);
+  const recipes = dedupeRecipes(normalizeRecipes(data.recipes || [], itemsByRecipe, favorites));
 
   return {
     categories: categories.length ? [mockCategories[0], ...categories] : mockCategories,
@@ -290,6 +290,15 @@ function normalizeRecipes(
         steps: splitSteps(row.steps)
       };
     });
+}
+
+function dedupeRecipes(recipes: Recipe[]) {
+  const byId = new Map<string, Recipe>();
+  recipes.forEach((recipe) => {
+    if (!recipe.id) return;
+    byId.set(recipe.id, recipe);
+  });
+  return Array.from(byId.values());
 }
 
 function groupRecipeItems(rows: Array<Record<string, unknown>>) {
