@@ -46,6 +46,9 @@ import type { Category, CategoryId, Ingredient, Recipe, Unit } from "./types/app
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "favorites";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
+type IngredientFilter = "all" | "base" | "topping";
+type SortMode = "latest" | "name" | "cost";
+type CostMode = "formula" | "price" | "profit";
 
 const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
@@ -56,6 +59,11 @@ function App() {
   const [tab, setTab] = useState<Tab>("home");
   const [screen, setScreen] = useState<Screen>("main");
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>("all");
+  const [sortMode, setSortMode] = useState<SortMode>("latest");
+  const [ingredientFilter, setIngredientFilter] = useState<IngredientFilter>("all");
+  const [costMode, setCostMode] = useState<CostMode>("formula");
+  const [targetMargin, setTargetMargin] = useState(60);
+  const [favoriteEditMode, setFavoriteEditMode] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(cachedData?.recipes[0] || mockRecipes[0]);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || mockCategories);
   const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || mockRecipes);
@@ -93,8 +101,13 @@ function App() {
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);
-    return tab === "favorites" ? base.filter((recipe) => recipe.favorite) : base;
-  }, [recipes, selectedCategory, tab]);
+    const visible = tab === "favorites" ? base.filter((recipe) => recipe.favorite) : base;
+    return visible.slice().sort((a, b) => {
+      if (sortMode === "name") return a.name.localeCompare(b.name, "th");
+      if (sortMode === "cost") return calculateCost(b, ingredientList).totalCost - calculateCost(a, ingredientList).totalCost;
+      return 0;
+    });
+  }, [ingredientList, recipes, selectedCategory, sortMode, tab]);
 
   const selectedCost = calculateCost(selectedRecipe, ingredientList);
   const favoriteRecipes = recipes.filter((recipe) => recipe.favorite);
@@ -295,27 +308,56 @@ function App() {
               {loading ? (
                 <LoadingScreen />
               ) : tab === "home" ? (
-                <HomeScreen categories={categoryList} favoriteRecipes={favoriteRecipes} onNavigate={setTab} onOpen={openRecipe} />
+                <HomeScreen
+                  categories={categoryList}
+                  favoriteRecipes={favoriteRecipes}
+                  onCategory={(category) => {
+                    setSelectedCategory(category);
+                    setTab("recipes");
+                  }}
+                  onNavigate={setTab}
+                  onOpen={openRecipe}
+                />
               ) : tab === "recipes" ? (
                 <RecipesScreen
                   categories={categoryList}
                   recipes={filteredRecipes}
+                  sortMode={sortMode}
                   selectedCategory={selectedCategory}
                   onCategory={setSelectedCategory}
                   onOpen={openRecipe}
+                  onSort={() => setSortMode((mode) => (mode === "latest" ? "name" : mode === "name" ? "cost" : "latest"))}
                 />
               ) : tab === "cost" ? (
-                <CostScreen cost={selectedCost} ingredients={ingredientList} recipe={selectedRecipe} />
+                <CostScreen
+                  cost={selectedCost}
+                  costMode={costMode}
+                  ingredients={ingredientList}
+                  recipe={selectedRecipe}
+                  targetMargin={targetMargin}
+                  onChangeMode={setCostMode}
+                  onChangeRecipe={() => setTab("recipes")}
+                  onMargin={setTargetMargin}
+                />
               ) : tab === "ingredients" ? (
                 <IngredientsScreen
+                  filter={ingredientFilter}
                   ingredients={ingredientList}
                   saving={saving}
                   onAdd={startAddIngredient}
                   onDelete={removeIngredient}
                   onEdit={startEditIngredient}
+                  onFilter={setIngredientFilter}
                 />
               ) : (
-                <FavoritesScreen ingredients={ingredientList} recipes={favoriteRecipes} onOpen={openRecipe} />
+                <FavoritesScreen
+                  editMode={favoriteEditMode}
+                  ingredients={ingredientList}
+                  recipes={favoriteRecipes}
+                  onFavorite={toggleFavorite}
+                  onOpen={openRecipe}
+                  onToggleEdit={() => setFavoriteEditMode((value) => !value)}
+                />
               )}
             </main>
             <BottomNav active={tab} onAdd={startAddRecipe} onChange={setTab} />
@@ -329,11 +371,13 @@ function App() {
 function HomeScreen({
   categories,
   favoriteRecipes,
+  onCategory,
   onOpen,
   onNavigate
 }: {
   categories: Category[];
   favoriteRecipes: Recipe[];
+  onCategory: (category: CategoryId) => void;
   onOpen: (recipe: Recipe) => void;
   onNavigate: (tab: Tab) => void;
 }) {
@@ -351,7 +395,7 @@ function HomeScreen({
           <Search size={18} />
           <input placeholder="ค้นหาเมนู เช่น ชาไทย, โกโก้, นมสด..." />
         </label>
-        <button className="icon-button" type="button">
+        <button className="icon-button" onClick={() => onNavigate("ingredients")} type="button">
           <SlidersHorizontal size={19} />
         </button>
       </div>
@@ -371,12 +415,12 @@ function HomeScreen({
           </div>
         </button>
       </section>
-      <SectionTitle action="ดูทั้งหมด" title="หมวดหมู่เครื่องดื่ม" />
+      <SectionTitle action="ดูทั้งหมด" title="หมวดหมู่เครื่องดื่ม" onAction={() => onNavigate("recipes")} />
       <div className="category-strip">
         {categories.slice(1).map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
           return (
-            <button className="category-chip" key={category.id} type="button">
+            <button className="category-chip" key={category.id} onClick={() => onCategory(category.id)} type="button">
               <span style={{ background: category.color }}>
                 <Icon size={18} />
               </span>
@@ -385,7 +429,7 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle action="ดูทั้งหมด" title="เมนูขายดีประจำวัน" />
+      <SectionTitle action="ดูทั้งหมด" title="เมนูขายดีประจำวัน" onAction={() => onNavigate("favorites")} />
       <div className="horizontal-cards">
         {favoriteRecipes.map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
@@ -418,14 +462,19 @@ function RecipesScreen({
   selectedCategory,
   onCategory,
   recipes,
-  onOpen
+  sortMode,
+  onOpen,
+  onSort
 }: {
   categories: Category[];
   selectedCategory: CategoryId;
   onCategory: (category: CategoryId) => void;
   recipes: Recipe[];
+  sortMode: SortMode;
   onOpen: (recipe: Recipe) => void;
+  onSort: () => void;
 }) {
+  const sortLabel = sortMode === "latest" ? "ล่าสุด" : sortMode === "name" ? "ชื่อเมนู" : "ต้นทุนสูง";
   return (
     <>
       <TopTitle right={<Search size={22} />} title="สูตร" />
@@ -444,9 +493,9 @@ function RecipesScreen({
       </div>
       <div className="list-meta">
         <span>ทั้งหมด {recipes.length} เมนู</span>
-        <span>
-          ล่าสุด <ChevronDown size={14} />
-        </span>
+        <button className="sort-button" onClick={onSort} type="button">
+          {sortLabel} <ChevronDown size={14} />
+        </button>
       </div>
       <div className="recipe-grid">
         {recipes.map((recipe) => (
@@ -539,15 +588,32 @@ function RecipeDetail({
   );
 }
 
-function CostScreen({ recipe, cost }: { recipe: Recipe; ingredients: Ingredient[]; cost: ReturnType<typeof calculateCost> }) {
-  const suggested = roundPrice(cost.totalCost / (1 - 0.6));
+function CostScreen({
+  recipe,
+  cost,
+  costMode,
+  targetMargin,
+  onChangeMode,
+  onChangeRecipe,
+  onMargin
+}: {
+  recipe: Recipe;
+  ingredients: Ingredient[];
+  cost: ReturnType<typeof calculateCost>;
+  costMode: CostMode;
+  targetMargin: number;
+  onChangeMode: (mode: CostMode) => void;
+  onChangeRecipe: () => void;
+  onMargin: (margin: number) => void;
+}) {
+  const suggested = roundPrice(cost.totalCost / (1 - targetMargin / 100));
   return (
     <>
       <TopTitle title="คำนวณต้นทุน" />
       <div className="tabs">
-        <button className="is-active" type="button">คำนวณจากสูตร</button>
-        <button type="button">ตั้งราคาขาย</button>
-        <button type="button">สรุปกำไร</button>
+        <button className={costMode === "formula" ? "is-active" : ""} onClick={() => onChangeMode("formula")} type="button">คำนวณจากสูตร</button>
+        <button className={costMode === "price" ? "is-active" : ""} onClick={() => onChangeMode("price")} type="button">ตั้งราคาขาย</button>
+        <button className={costMode === "profit" ? "is-active" : ""} onClick={() => onChangeMode("profit")} type="button">สรุปกำไร</button>
       </div>
       <section className="selected-recipe">
         <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
@@ -555,68 +621,83 @@ function CostScreen({ recipe, cost }: { recipe: Recipe; ingredients: Ingredient[
           <strong>{recipe.name} (16 oz)</strong>
           <span>ต้นทุนล่าสุดจากสูตร</span>
         </div>
-        <button type="button">เปลี่ยนเมนู</button>
+        <button onClick={onChangeRecipe} type="button">เปลี่ยนเมนู</button>
       </section>
-      <section className="cost-card">
-        <h3>ต้นทุนต่อแก้ว</h3>
-        <CostLine label="วัตถุดิบน้ำ" value={cost.ingredientCost} />
-        <CostLine label="ท็อปปิ้ง" value={cost.toppingCost} />
-        <CostLine label="บรรจุภัณฑ์" value={cost.packagingCost} />
-        <div className="total-line">
-          <span>รวมต้นทุน</span>
-          <strong>{money(cost.totalCost)} บาท</strong>
-        </div>
-        <div className="price-line">
-          <span>ราคาขายปัจจุบัน</span>
-          <strong>{recipe.sellingPrice} บาท</strong>
-        </div>
-      </section>
-      <section className="profit-panel">
-        <div>
-          <span>กำไรต่อแก้ว</span>
-          <strong>{money(cost.profit)} บาท</strong>
-        </div>
-        <div>
-          <span>กำไร</span>
-          <strong>{money(cost.margin)}%</strong>
-        </div>
-      </section>
-      <section className="pricing-card">
-        <h3>ราคาขายที่แนะนำ</h3>
-        <div className="margin-row">
-          {[40, 50, 60, 70].map((margin) => (
-            <button className={margin === 60 ? "is-active" : ""} key={margin} type="button">
-              {margin}%
-            </button>
-          ))}
-        </div>
-        <strong>{suggested} บาท</strong>
-        <span>คำนวณจาก margin 60%</span>
-      </section>
+      {costMode === "formula" ? (
+        <section className="cost-card">
+          <h3>ต้นทุนต่อสูตร</h3>
+          <CostLine label="วัตถุดิบน้ำ" value={cost.ingredientCost} />
+          <CostLine label="ท็อปปิ้ง" value={cost.toppingCost} />
+          <CostLine label="บรรจุภัณฑ์" value={cost.packagingCost} />
+          <div className="total-line">
+            <span>รวมต้นทุน</span>
+            <strong>{money(cost.totalCost)} บาท</strong>
+          </div>
+          <div className="price-line">
+            <span>ราคาขายปัจจุบัน</span>
+            <strong>{recipe.sellingPrice} บาท</strong>
+          </div>
+        </section>
+      ) : null}
+      {costMode === "profit" ? (
+        <section className="profit-panel">
+          <div>
+            <span>กำไรต่อสูตร</span>
+            <strong>{money(cost.profit)} บาท</strong>
+          </div>
+          <div>
+            <span>กำไร</span>
+            <strong>{money(cost.margin)}%</strong>
+          </div>
+        </section>
+      ) : null}
+      {costMode === "price" ? (
+        <section className="pricing-card">
+          <h3>ราคาขายที่แนะนำ</h3>
+          <div className="margin-row">
+            {[40, 50, 60, 70].map((margin) => (
+              <button className={margin === targetMargin ? "is-active" : ""} key={margin} onClick={() => onMargin(margin)} type="button">
+                {margin}%
+              </button>
+            ))}
+          </div>
+          <strong>{suggested} บาท</strong>
+          <span>คำนวณจาก margin {targetMargin}%</span>
+        </section>
+      ) : null}
     </>
   );
 }
 
 function IngredientsScreen({
+  filter,
   ingredients,
   saving,
   onAdd,
   onDelete,
-  onEdit
+  onEdit,
+  onFilter
 }: {
+  filter: IngredientFilter;
   ingredients: Ingredient[];
   saving: boolean;
   onAdd: () => void;
   onDelete: (id: string) => void;
   onEdit: (ingredient: Ingredient) => void;
+  onFilter: (filter: IngredientFilter) => void;
 }) {
+  const visibleIngredients = ingredients.filter((ingredient) => {
+    if (filter === "topping") return ingredient.category === "ท็อปปิ้ง";
+    if (filter === "base") return ingredient.category !== "ท็อปปิ้ง";
+    return true;
+  });
   return (
     <>
       <TopTitle right={<Settings2 size={20} />} title="วัตถุดิบ" />
       <div className="ingredient-tabs">
-        <button className="is-active" type="button">ทั้งหมด</button>
-        <button type="button">วัตถุดิบ</button>
-        <button type="button">ท็อปปิ้ง</button>
+        <button className={filter === "all" ? "is-active" : ""} onClick={() => onFilter("all")} type="button">ทั้งหมด</button>
+        <button className={filter === "base" ? "is-active" : ""} onClick={() => onFilter("base")} type="button">วัตถุดิบ</button>
+        <button className={filter === "topping" ? "is-active" : ""} onClick={() => onFilter("topping")} type="button">ท็อปปิ้ง</button>
         <button onClick={onAdd} type="button">
           <Plus size={16} /> เพิ่มวัตถุดิบ
         </button>
@@ -628,7 +709,7 @@ function IngredientsScreen({
           <span>ราคาซื้อ</span>
           <span>จัดการ</span>
         </div>
-        {ingredients.map((ingredient) => (
+        {visibleIngredients.map((ingredient) => (
           <div className="table-row" key={ingredient.id}>
             <strong>{ingredient.name}</strong>
             <span>
@@ -646,21 +727,35 @@ function IngredientsScreen({
   );
 }
 
-function FavoritesScreen({ recipes, ingredients, onOpen }: { recipes: Recipe[]; ingredients: Ingredient[]; onOpen: (recipe: Recipe) => void }) {
+function FavoritesScreen({
+  editMode,
+  recipes,
+  ingredients,
+  onFavorite,
+  onOpen,
+  onToggleEdit
+}: {
+  editMode: boolean;
+  recipes: Recipe[];
+  ingredients: Ingredient[];
+  onFavorite: (id: string) => void;
+  onOpen: (recipe: Recipe) => void;
+  onToggleEdit: () => void;
+}) {
   return (
     <>
-      <TopTitle right={<button className="text-button" type="button">แก้ไข</button>} title="เมนูโปรด" />
+      <TopTitle right={<button className="text-button" onClick={onToggleEdit} type="button">{editMode ? "เสร็จ" : "แก้ไข"}</button>} title="เมนูโปรด" />
       <div className="favorite-list">
         {recipes.map((recipe) => {
           const cost = calculateCost(recipe, ingredients);
           return (
-            <button className="favorite-row" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
+            <button className="favorite-row" key={recipe.id} onClick={() => (editMode ? onFavorite(recipe.id) : onOpen(recipe))} type="button">
               <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
               <div>
                 <strong>{recipe.name}</strong>
-                <span>16 oz · ต้นทุน {money(cost.totalCost)} บาท</span>
+                <span>ต้นทุน {money(cost.totalCost)} บาท · กำไร {money(cost.profit)} บาท</span>
               </div>
-              <Heart className="is-favorite" fill="currentColor" size={20} />
+              <Heart className={editMode ? "favorite-remove" : "is-favorite"} fill="currentColor" size={20} />
             </button>
           );
         })}
@@ -848,11 +943,11 @@ function TopTitle({ title, right, left }: { title: string; right?: ReactNode; le
   );
 }
 
-function SectionTitle({ title, action }: { title: string; action: string }) {
+function SectionTitle({ title, action, onAction }: { title: string; action: string; onAction?: () => void }) {
   return (
     <div className="section-title">
       <h2>{title}</h2>
-      <button type="button">
+      <button onClick={onAction} type="button">
         {action} <ChevronRight size={14} />
       </button>
     </div>

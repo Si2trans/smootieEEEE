@@ -453,6 +453,15 @@ p {
   gap: 3px;
 }
 
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .badge {
   position: absolute;
   top: 9px;
@@ -470,6 +479,10 @@ p {
 
 .is-favorite {
   color: #ff4848;
+}
+
+.favorite-remove {
+  color: #b42318;
 }
 
 .drink-art {
