@@ -108,7 +108,6 @@ function App() {
   return (
     <div className="app-shell">
       <div className="phone">
-        <StatusBar />
         {screen === "detail" ? (
           <RecipeDetail recipe={selectedRecipe} ingredients={ingredientList} onBack={() => setScreen("main")} onFavorite={toggleFavorite} />
         ) : screen === "ingredientForm" ? (
@@ -144,15 +143,6 @@ function App() {
         <h2>Drink Cost Studio</h2>
         <p>PWA mock พร้อมต่อ Google Apps Script และ Google Sheet สำหรับร้านเดียว</p>
       </aside>
-    </div>
-  );
-}
-
-function StatusBar() {
-  return (
-    <div className="status-bar">
-      <strong>9:41</strong>
-      <span>▮▮▮ Wi-Fi ▰</span>
     </div>
   );
 }
