@@ -183,9 +183,9 @@ function App() {
         imageUrl,
         imageFileId,
         status: String(form.get("status") || ""),
-        prepTime: Number(form.get("prepTime") || 5),
-        sweetness: Number(form.get("sweetness") || 75),
-        sizeOz: Number(form.get("sizeOz") || 16),
+        prepTime: editingRecipe?.prepTime || 0,
+        sweetness: editingRecipe?.sweetness || 0,
+        sizeOz: editingRecipe?.sizeOz || 0,
         sellingPrice: Number(form.get("sellingPrice") || 35),
         favorite: editingRecipe?.favorite || false,
         rating: editingRecipe?.rating || 4.5,
@@ -498,18 +498,13 @@ function RecipeDetail({
       <div className="detail-hero">
         <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
         {recipe.status ? <span className="badge badge--hot">{recipe.status}</span> : null}
-        <span className="time-pill">{recipe.prepTime} นาที</span>
+        {recipe.prepTime > 0 ? <span className="time-pill">{recipe.prepTime} นาที</span> : null}
       </div>
       <section className="metric-row">
-        <Metric label="ระดับหวาน" value={`${recipe.sweetness}%`} />
-        <Metric label="ขนาดแนะนำ" value={`${recipe.sizeOz} oz`} />
-        <Metric label="ต้นทุน/แก้ว" value={`${money(cost.totalCost)} บาท`} />
+        <Metric label="ต้นทุน" value={`${money(cost.totalCost)} บาท`} />
+        <Metric label="ราคาขาย" value={`${money(recipe.sellingPrice)} บาท`} />
+        <Metric label="กำไร" value={`${money(cost.profit)} บาท`} />
       </section>
-      <div className="segmented">
-        <button className="is-active" type="button">16 oz</button>
-        <button type="button">22 oz</button>
-        <button type="button">แก้วร้อน</button>
-      </div>
       <section className="detail-section">
         <div className="detail-section__title">
           <h3>ส่วนผสม</h3>
@@ -755,14 +750,7 @@ function RecipeForm({
           <input accept="image/*" name="image" type="file" />
         </label>
         <FormField defaultValue={recipe?.status || ""} label="ป้ายสถานะ" name="status" placeholder="เช่น ขายดี" />
-        <div className="form-split">
-          <FormField defaultValue={recipe?.prepTime || 5} label="เวลาเตรียม (นาที)" name="prepTime" placeholder="5" type="number" />
-          <FormField defaultValue={recipe?.sizeOz || 16} label="ขนาด (oz)" name="sizeOz" placeholder="16" type="number" />
-        </div>
-        <div className="form-split">
-          <FormField defaultValue={recipe?.sweetness || 75} label="ระดับหวาน (%)" name="sweetness" placeholder="75" type="number" />
-          <FormField defaultValue={recipe?.sellingPrice || 35} label="ราคาขาย (บาท)" name="sellingPrice" placeholder="35" type="number" />
-        </div>
+        <FormField defaultValue={recipe?.sellingPrice || 35} label="ราคาขาย (บาท)" name="sellingPrice" placeholder="35" type="number" />
         <label>
           วิธีทำ
           <textarea defaultValue={recipe?.steps.join("\n") || ""} name="steps" placeholder="หนึ่งบรรทัดต่อหนึ่งขั้นตอน" />
