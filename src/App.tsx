@@ -18,7 +18,6 @@ import {
   ShoppingBag,
   SlidersHorizontal,
   Sparkles,
-  Star,
   Store,
   Trash2,
   WalletCards
@@ -156,10 +155,12 @@ function App() {
   }
 
   async function toggleFavorite(recipeId: string) {
-    setRecipes((items) => items.map((item) => (item.id === recipeId ? { ...item, favorite: !item.favorite } : item)));
-    if (selectedRecipe.id === recipeId) setSelectedRecipe((recipe) => ({ ...recipe, favorite: !recipe.favorite }));
+    const current = recipes.find((item) => item.id === recipeId);
+    const nextFavorite = !(current?.favorite ?? selectedRecipe.favorite);
+    setRecipes((items) => items.map((item) => (item.id === recipeId ? { ...item, favorite: nextFavorite } : item)));
+    if (selectedRecipe.id === recipeId) setSelectedRecipe((recipe) => ({ ...recipe, favorite: nextFavorite }));
     try {
-      await toggleFavoriteRemote(recipeId);
+      await toggleFavoriteRemote(recipeId, nextFavorite);
       await refreshData(recipeId);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกเมนูโปรดไม่สำเร็จ");
@@ -481,9 +482,6 @@ function HomeScreen({
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
             <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
             <strong>{recipe.name}</strong>
-            <span>
-              <Star size={12} fill="currentColor" /> {recipe.rating}
-            </span>
           </button>
         ))}
       </div>

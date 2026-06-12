@@ -151,8 +151,8 @@ export async function deleteIngredient(ingredientId: string) {
   return postAction("deleteIngredient", { id: ingredientId });
 }
 
-export async function toggleFavoriteRemote(recipeId: string) {
-  return postAction("toggleFavorite", { recipe_id: recipeId });
+export async function toggleFavoriteRemote(recipeId: string, favorite?: boolean) {
+  return postAction("toggleFavorite", { recipe_id: recipeId, favorite });
 }
 
 export async function uploadRecipeImage(input: UploadImageInput): Promise<{ image_url: string; file_id: string }> {
@@ -284,7 +284,7 @@ function normalizeRecipes(
         sweetness: number(row.sweetness, 75),
         sizeOz: number(row.size_oz || row.sizeOz, 16),
         sellingPrice: number(row.selling_price || row.sellingPrice, 0),
-        favorite: bool(row.favorite, false) || favorites.has(id),
+        favorite: row.favorite === undefined || row.favorite === null || row.favorite === "" ? favorites.has(id) : bool(row.favorite, false),
         rating: number(row.rating, 4.5),
         items: itemsByRecipe.get(id) || [],
         steps: splitSteps(row.steps)

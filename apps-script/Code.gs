@@ -190,7 +190,7 @@ function doPost(e) {
     if (action === "saveRecipe") return jsonResponse(saveRecipe(payload));
     if (action === "deleteIngredient") return jsonResponse(deleteObject(SHEETS.ingredients, payload.id));
     if (action === "deleteRecipe") return jsonResponse(deleteRecipe(payload.id));
-    if (action === "toggleFavorite") return jsonResponse(toggleFavorite(payload.recipe_id));
+    if (action === "toggleFavorite") return jsonResponse(toggleFavorite(payload.recipe_id, payload.favorite));
     if (action === "calculateCost") return jsonResponse(calculateCost(payload.recipe_id));
     if (action === "uploadRecipeImage") return jsonResponse(uploadRecipeImage(payload));
     return jsonResponse({ ok: false, error: "Unknown action: " + action }, 404);
@@ -312,20 +312,40 @@ function removeFavorite(recipeId) {
   }
 }
 
-function toggleFavorite(recipeId) {
+function toggleFavorite(recipeId, requestedFavorite) {
   recipeId = cleanId(recipeId);
   const sheet = getSheet(SHEETS.favorites);
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
   const recipeIndex = headers.indexOf("recipe_id");
+  let exists = false;
   for (let row = 1; row < rows.length; row++) {
     if (cleanId(rows[row][recipeIndex]) === recipeId) {
-      sheet.deleteRow(row + 1);
-      return { ok: true, favorite: false };
+      exists = true;
+      if (requestedFavorite === false) sheet.deleteRow(row + 1);
+      break;
     }
   }
-  appendObject(sheet, headers, { id: "fav_" + Date.now(), recipe_id: recipeId, sort_order: rows.length });
-  return { ok: true, favorite: true };
+  const nextFavorite = requestedFavorite === undefined || requestedFavorite === null ? !exists : Boolean(requestedFavorite);
+  if (nextFavorite && !exists) appendObject(sheet, headers, { id: "fav_" + Date.now(), recipe_id: recipeId, sort_order: rows.length });
+  setRecipeFavorite(recipeId, nextFavorite);
+  return { ok: true, favorite: nextFavorite };
+}
+
+function setRecipeFavorite(recipeId, favorite) {
+  const sheet = getSheet(SHEETS.recipes);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idIndex = headers.indexOf("id");
+  const favoriteIndex = headers.indexOf("favorite");
+  const updatedIndex = headers.indexOf("updated_at");
+  if (favoriteIndex < 0) return;
+  for (let row = 1; row < values.length; row++) {
+    if (cleanId(values[row][idIndex]) === recipeId) {
+      sheet.getRange(row + 1, favoriteIndex + 1).setValue(Boolean(favorite));
+      if (updatedIndex >= 0) sheet.getRange(row + 1, updatedIndex + 1).setValue(new Date().toISOString());
+    }
+  }
 }
 
 function calculateCost(recipeId) {
