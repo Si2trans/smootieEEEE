@@ -465,7 +465,7 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle action="ดูทั้งหมด" title={searchQuery.trim() ? "ผลการค้นหา" : "เมนูด่วนจี๋"} onAction={() => onNavigate("recipes")} />
+      <SectionTitle action="ดูทั้งหมด" title={searchQuery.trim() ? "ผลการค้นหา" : "เมนูทั้งหมด"} onAction={() => onNavigate("recipes")} />
       <div className="horizontal-cards">
         {homeRecipes.map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
