@@ -211,6 +211,10 @@ p {
   font-size: 13px;
 }
 
+.search-box--screen {
+  margin: 10px 0 12px;
+}
+
 .icon-button {
   border-radius: 13px;
   background: #f2f4ef;

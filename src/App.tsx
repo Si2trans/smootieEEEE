@@ -62,6 +62,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("home");
   const [screen, setScreen] = useState<Screen>("main");
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("latest");
   const [ingredientFilter, setIngredientFilter] = useState<IngredientFilter>("all");
   const [costMode, setCostMode] = useState<CostMode>("formula");
@@ -105,12 +106,13 @@ function App() {
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);
-    return base.slice().sort((a, b) => {
+    const searched = filterRecipes(base, searchQuery, categoryList);
+    return searched.slice().sort((a, b) => {
       if (sortMode === "name") return a.name.localeCompare(b.name, "th");
       if (sortMode === "cost") return calculateCost(b, ingredientList).totalCost - calculateCost(a, ingredientList).totalCost;
       return 0;
     });
-  }, [ingredientList, recipes, selectedCategory, sortMode]);
+  }, [categoryList, ingredientList, recipes, searchQuery, selectedCategory, sortMode]);
 
   const selectedCost = calculateCost(selectedRecipe, ingredientList);
 
@@ -332,22 +334,26 @@ function App() {
                 <HomeScreen
                   categories={categoryList}
                   recipes={recipes}
+                  searchQuery={searchQuery}
                   onCategory={(category) => {
                     setSelectedCategory(category);
                     setTab("recipes");
                   }}
                   onNavigate={setTab}
                   onOpen={openRecipe}
+                  onSearch={setSearchQuery}
                 />
               ) : tab === "recipes" ? (
                 <RecipesScreen
                   categories={categoryList}
                   pickingCostRecipe={pickingCostRecipe}
                   recipes={filteredRecipes}
+                  searchQuery={searchQuery}
                   sortMode={sortMode}
                   selectedCategory={selectedCategory}
                   onCategory={setSelectedCategory}
                   onOpen={openRecipe}
+                  onSearch={setSearchQuery}
                   onSort={() => setSortMode((mode) => (mode === "latest" ? "name" : mode === "name" ? "cost" : "latest"))}
                 />
               ) : tab === "cost" ? (
@@ -389,16 +395,21 @@ function App() {
 function HomeScreen({
   categories,
   recipes,
+  searchQuery,
   onCategory,
   onOpen,
-  onNavigate
+  onNavigate,
+  onSearch
 }: {
   categories: Category[];
   recipes: Recipe[];
+  searchQuery: string;
   onCategory: (category: CategoryId) => void;
   onOpen: (recipe: Recipe) => void;
   onNavigate: (tab: Tab) => void;
+  onSearch: (query: string) => void;
 }) {
+  const homeRecipes = filterRecipes(recipes, searchQuery, categories).slice(0, 8);
   return (
     <>
       <header className="home-header">
@@ -411,7 +422,14 @@ function HomeScreen({
       <div className="search-row">
         <label className="search-box">
           <Search size={18} />
-          <input placeholder="ค้นหาเมนู เช่น ชาไทย, โกโก้, นมสด..." />
+          <input
+            onChange={(event) => onSearch(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onNavigate("recipes");
+            }}
+            placeholder="ค้นหาเมนู เช่น ชาไทย, โกโก้, นมสด..."
+            value={searchQuery}
+          />
         </label>
         <button className="icon-button" onClick={() => onNavigate("ingredients")} type="button">
           <SlidersHorizontal size={19} />
@@ -447,15 +465,16 @@ function HomeScreen({
           );
         })}
       </div>
-      <SectionTitle action="ดูทั้งหมด" title="เมนูขายดีประจำวัน" onAction={() => onNavigate("recipes")} />
+      <SectionTitle action="ดูทั้งหมด" title={searchQuery.trim() ? "ผลการค้นหา" : "เมนูขายดีประจำวัน"} onAction={() => onNavigate("recipes")} />
       <div className="horizontal-cards">
-        {recipes.slice(0, 8).map((recipe) => (
+        {homeRecipes.map((recipe) => (
           <button className="mini-card" key={recipe.id} onClick={() => onOpen(recipe)} type="button">
             <DrinkArt compact imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
             <strong>{recipe.name}</strong>
           </button>
         ))}
       </div>
+      {!homeRecipes.length ? <p className="empty-text">ไม่พบเมนูที่ค้นหา</p> : null}
     </>
   );
 }
@@ -478,8 +497,10 @@ function RecipesScreen({
   selectedCategory,
   onCategory,
   recipes,
+  searchQuery,
   sortMode,
   onOpen,
+  onSearch,
   onSort
 }: {
   categories: Category[];
@@ -487,8 +508,10 @@ function RecipesScreen({
   selectedCategory: CategoryId;
   onCategory: (category: CategoryId) => void;
   recipes: Recipe[];
+  searchQuery: string;
   sortMode: SortMode;
   onOpen: (recipe: Recipe) => void;
+  onSearch: (query: string) => void;
   onSort: () => void;
 }) {
   const sortLabel = sortMode === "latest" ? "ล่าสุด" : sortMode === "name" ? "ชื่อเมนู" : "ต้นทุนสูง";
@@ -496,6 +519,14 @@ function RecipesScreen({
     <>
       <TopTitle right={<Search size={22} />} title={pickingCostRecipe ? "เลือกเมนูคำนวณ" : "สูตร"} />
       {pickingCostRecipe ? <div className="status-banner">แตะสูตรที่ต้องการ แล้วแอปจะกลับไปหน้าคำนวณต้นทุน</div> : null}
+      <label className="search-box search-box--screen">
+        <Search size={18} />
+        <input
+          onChange={(event) => onSearch(event.currentTarget.value)}
+          placeholder="ค้นหาเมนู..."
+          value={searchQuery}
+        />
+      </label>
       <div className="category-filter">
         {categories.map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
@@ -1099,6 +1130,19 @@ function CostLine({ label, value }: { label: string; value: number }) {
       <strong>{money(value)} บาท</strong>
     </div>
   );
+}
+
+function filterRecipes(recipes: Recipe[], query: string, categories: Category[]) {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) return recipes;
+  const categoryById = new Map(categories.map((category) => [category.id, category.label]));
+  return recipes.filter((recipe) => {
+    const categoryLabel = categoryById.get(recipe.categoryId) || "";
+    return [recipe.name, recipe.status || "", categoryLabel]
+      .join(" ")
+      .toLowerCase()
+      .includes(keyword);
+  });
 }
 
 export default App;
