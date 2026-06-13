@@ -140,6 +140,28 @@ function App() {
     setSelectedRecipe(recipe);
   }
 
+  function removeRecipeLocally(recipeId: string) {
+    const nextRecipes = recipes.filter((recipe) => recipe.id !== recipeId);
+    setRecipes(nextRecipes);
+    setSelectedRecipe((current) => (current.id === recipeId ? nextRecipes[0] || mockRecipes[0] : current));
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: nextRecipes });
+  }
+
+  function removeIngredientLocally(ingredientId: string) {
+    const nextIngredients = ingredientList.filter((ingredient) => ingredient.id !== ingredientId);
+    const nextRecipes = recipes.map((recipe) => ({
+      ...recipe,
+      items: recipe.items.filter((item) => item.ingredientId !== ingredientId)
+    }));
+    setIngredientList(nextIngredients);
+    setRecipes(nextRecipes);
+    setSelectedRecipe((current) => ({
+      ...current,
+      items: current.items.filter((item) => item.ingredientId !== ingredientId)
+    }));
+    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes: nextRecipes });
+  }
+
   function openRecipe(recipe: Recipe) {
     setSelectedRecipe(recipe);
     if (pickingCostRecipe) {
@@ -254,7 +276,7 @@ function App() {
     setMessage("");
     try {
       await deleteRecipe(recipeId);
-      await refreshData();
+      removeRecipeLocally(recipeId);
       setTab("recipes");
       setScreen("main");
     } catch (error) {
@@ -270,7 +292,7 @@ function App() {
     setMessage("");
     try {
       await deleteIngredient(ingredientId);
-      await refreshData();
+      removeIngredientLocally(ingredientId);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "ลบวัตถุดิบไม่สำเร็จ");
     } finally {
