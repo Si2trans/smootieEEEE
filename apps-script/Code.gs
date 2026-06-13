@@ -188,7 +188,7 @@ function doPost(e) {
   try {
     if (action === "saveIngredient") return jsonResponse(saveObject(SHEETS.ingredients, payload));
     if (action === "saveRecipe") return jsonResponse(saveRecipe(payload));
-    if (action === "deleteIngredient") return jsonResponse(deleteObject(SHEETS.ingredients, payload.id));
+    if (action === "deleteIngredient") return jsonResponse(deleteIngredient(payload.id));
     if (action === "deleteRecipe") return jsonResponse(deleteRecipe(payload.id));
     if (action === "toggleFavorite") return jsonResponse(toggleFavorite(payload.recipe_id, payload.favorite));
     if (action === "calculateCost") return jsonResponse(calculateCost(payload.recipe_id));
@@ -246,24 +246,25 @@ function deleteRecipe(recipeId) {
   const values = sheet.getDataRange().getValues();
   const headers = values[0];
   const idIndex = headers.indexOf("id");
-  const activeIndex = headers.indexOf("active");
-  const updatedIndex = headers.indexOf("updated_at");
   if (!recipeId) throw new Error("Missing recipe id.");
 
   for (let row = 1; row < values.length; row++) {
     if (cleanId(values[row][idIndex]) === recipeId) {
-      if (activeIndex >= 0) {
-        sheet.getRange(row + 1, activeIndex + 1).setValue(false);
-        if (updatedIndex >= 0) sheet.getRange(row + 1, updatedIndex + 1).setValue(new Date().toISOString());
-      } else {
-        sheet.deleteRow(row + 1);
-      }
+      sheet.deleteRow(row + 1);
       deleteRecipeItems(recipeId);
       removeFavorite(recipeId);
       return { ok: true, id: recipeId, mode: "deleted" };
     }
   }
   return { ok: true, id: recipeId, mode: "not_found" };
+}
+
+function deleteIngredient(ingredientId) {
+  ingredientId = cleanId(ingredientId);
+  if (!ingredientId) throw new Error("Missing ingredient id.");
+  const deleted = deleteObject(SHEETS.ingredients, ingredientId);
+  deleteRecipeItemsByIngredient(ingredientId);
+  return deleted;
 }
 
 function deleteRecipeItems(recipeId) {
@@ -274,6 +275,17 @@ function deleteRecipeItems(recipeId) {
   const recipeIndex = headers.indexOf("recipe_id");
   for (let row = values.length - 1; row >= 1; row--) {
     if (cleanId(values[row][recipeIndex]) === recipeId) sheet.deleteRow(row + 1);
+  }
+}
+
+function deleteRecipeItemsByIngredient(ingredientId) {
+  ingredientId = cleanId(ingredientId);
+  const sheet = getSheet(SHEETS.recipeItems);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const ingredientIndex = headers.indexOf("ingredient_id");
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (cleanId(values[row][ingredientIndex]) === ingredientId) sheet.deleteRow(row + 1);
   }
 }
 
