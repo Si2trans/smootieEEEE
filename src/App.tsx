@@ -1,5 +1,5 @@
 import {
-  Bell,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -8,10 +8,12 @@ import {
   GlassWater,
   Grid2X2,
   Home,
+  KeyRound,
   Milk,
   Package,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Settings2,
   ShoppingBag,
@@ -21,23 +23,32 @@ import {
   Trash2,
   WalletCards
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, FormEvent, ReactNode } from "react";
 import cardCostBg from "./assets/UI/card-cost-bg.png";
 import cardRecipesBg from "./assets/UI/card-recipes-bg.png";
 import { DrinkArt } from "./components/DrinkArt";
 import { RecipeCard } from "./components/RecipeCard";
 import {
-  deleteIngredient,
-  deleteRecipe,
+  authenticateAccessKey,
+  clearStoredAccessKey,
   fetchAppData,
   fileToImagePayload,
   cacheAppData,
   getCachedAppData,
-  saveIngredient,
-  saveRecipe,
-  uploadRecipeImage
+  getStoredAccessKey,
+  isAccessDeniedError,
+  storeAccessKey
 } from "./lib/appsScriptApi";
+import {
+  applyQueuedMutations,
+  enqueueMutation,
+  flushSyncQueue,
+  getPendingMutationCount,
+  getSyncState,
+  subscribeSyncState
+} from "./lib/syncQueue";
+import type { SyncState } from "./lib/syncQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
 import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "./types/app";
 
@@ -58,6 +69,7 @@ const deliveryPlatforms = [
 
 function App() {
   const [cachedData] = useState(() => getCachedAppData());
+  const [accessKey, setAccessKey] = useState(() => getStoredAccessKey());
   const [tab, setTab] = useState<Tab>("home");
   const [screen, setScreen] = useState<Screen>("main");
   const [selectedCategory, setSelectedCategory] = useState<CategoryId>("all");
@@ -75,33 +87,64 @@ function App() {
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(!cachedData);
+  const [loading, setLoading] = useState(Boolean(accessKey && !cachedData));
+  const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState("");
+  const [authenticating, setAuthenticating] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+  const [syncState, setSyncState] = useState<SyncState>(() => getSyncState());
+  const backgroundSyncRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
-    if (cachedData) {
+    if (!accessKey) {
       setLoading(false);
       return;
     }
-
     let ignore = false;
-    fetchAppData()
-      .then((data) => {
+    const unsubscribe = subscribeSyncState(setSyncState);
+    const handleOnline = () => syncPendingInBackground();
+    window.addEventListener("online", handleOnline);
+
+    async function initialize() {
+      try {
+        if (cachedData) {
+          const localData = await applyQueuedMutations(cachedData);
+          if (ignore) return;
+          applyData(localData, selectedRecipe?.id);
+          setLoading(false);
+        }
+
+        const result = await flushSyncQueue();
         if (ignore) return;
-        applyData(data, selectedRecipe?.id);
-        setLoading(false);
-      })
-      .catch((error) => {
+        if (result.unauthorized) {
+          lockApp();
+          return;
+        }
+        if (!cachedData || (result.completed > 0 && result.pending === 0)) {
+          const remoteData = await fetchAppData({ cache: false });
+          const mergedData = await applyQueuedMutations(remoteData);
+          if (ignore) return;
+          cacheAppData(mergedData);
+          applyData(mergedData, selectedRecipe?.id);
+        }
+      } catch (error) {
         if (ignore) return;
+        if (handleAccessDenied(error)) return;
         console.warn(error);
-        setMessage("ยังเชื่อมต่อ Google Sheet ไม่ได้ กรุณาลองใหม่อีกครั้ง");
-        setLoading(false);
-      });
+        if (!cachedData) setMessage("ยังเชื่อมต่อ Google Sheet ไม่ได้ กรุณาลองใหม่อีกครั้ง");
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    }
+
+    void initialize();
 
     return () => {
       ignore = true;
+      unsubscribe();
+      window.removeEventListener("online", handleOnline);
     };
-  }, [cachedData]);
+  }, [accessKey, cachedData]);
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);
@@ -122,10 +165,90 @@ function App() {
     setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current?.id)) || data.recipes[0] || null);
   }
 
-  async function refreshData(selectedId?: string) {
-    const data = await fetchAppData();
-    applyData(data, selectedId);
-    return data;
+  function syncPendingInBackground() {
+    if (backgroundSyncRef.current) return backgroundSyncRef.current;
+    const run = (async () => {
+      let completed = 0;
+      while (true) {
+        const result = await flushSyncQueue();
+        completed += result.completed;
+        if (result.unauthorized) {
+          lockApp();
+          return;
+        }
+        if (result.error) return;
+        if (result.pending > 0) continue;
+        if (completed === 0) return;
+        const remoteData = await fetchAppData({ cache: false });
+        if ((await getPendingMutationCount()) > 0) continue;
+        cacheAppData(remoteData);
+        applyData(remoteData, selectedRecipe?.id);
+        return;
+      }
+    })()
+      .catch((error) => {
+        if (!handleAccessDenied(error)) console.warn("Background sync failed", error);
+      })
+      .finally(() => {
+        backgroundSyncRef.current = null;
+      });
+    backgroundSyncRef.current = run;
+    return run;
+  }
+
+  async function refreshFromSheet() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setMessage("");
+    try {
+      const result = await flushSyncQueue();
+      if (result.unauthorized) {
+        lockApp();
+        return;
+      }
+      if (result.pending > 0) throw new Error(result.error || "ยังมีรายการที่ส่งขึ้น Google Sheet ไม่สำเร็จ");
+      const remoteData = await fetchAppData({ cache: false });
+      if ((await getPendingMutationCount()) > 0) throw new Error("มีรายการใหม่กำลังรอซิงก์ กรุณากดรีเฟรชอีกครั้ง");
+      cacheAppData(remoteData);
+      applyData(remoteData, selectedRecipe?.id);
+      setMessage("อัปเดตข้อมูลจาก Google Sheet แล้ว");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "อัปเดตข้อมูลไม่สำเร็จ");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  function lockApp() {
+    clearStoredAccessKey();
+    setAccessKey("");
+    setAuthMessage("กรุณาใส่รหัสลับอีกครั้ง");
+    setRefreshing(false);
+  }
+
+  function handleAccessDenied(error: unknown) {
+    if (!isAccessDeniedError(error)) return false;
+    lockApp();
+    return true;
+  }
+
+  async function submitAccessKey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const nextAccessKey = String(form.get("accessKey") || "").trim();
+    if (!nextAccessKey) return;
+    setAuthenticating(true);
+    setAuthMessage("");
+    try {
+      await authenticateAccessKey(nextAccessKey);
+      storeAccessKey(nextAccessKey);
+      setAccessKey(nextAccessKey);
+      setLoading(!cachedData);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "ตรวจสอบรหัสลับไม่สำเร็จ");
+    } finally {
+      setAuthenticating(false);
+    }
   }
 
   function applyRecipeLocally(recipe: Recipe) {
@@ -137,6 +260,14 @@ function App() {
       return next;
     });
     setSelectedRecipe(recipe);
+  }
+
+  function applyIngredientLocally(ingredient: Ingredient) {
+    const nextIngredients = ingredientList.some((item) => item.id === ingredient.id)
+      ? ingredientList.map((item) => (item.id === ingredient.id ? ingredient : item))
+      : [ingredient, ...ingredientList];
+    setIngredientList(nextIngredients);
+    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes });
   }
 
   function removeRecipeLocally(recipeId: string) {
@@ -186,7 +317,7 @@ function App() {
     const buyUnit = String(form.get("buyUnit") || "ml") as Unit;
     const baseUnit = String(form.get("baseUnit") || buyUnit) as Unit;
     try {
-      await saveIngredient({
+      const ingredient: Ingredient = {
         id: editingIngredient?.id || `ing_${Date.now()}`,
         name: String(form.get("name") || "วัตถุดิบใหม่"),
         category: String(form.get("category") || "วัตถุดิบน้ำ"),
@@ -196,11 +327,13 @@ function App() {
         baseUnit,
         costPerUnit: buyQty > 0 ? buyPrice / buyQty : 0,
         note: String(form.get("note") || "")
-      });
-      await refreshData();
+      };
+      await enqueueMutation({ action: "saveIngredient", entityId: ingredient.id, payload: ingredient });
+      applyIngredientLocally(ingredient);
       setEditingIngredient(null);
       setTab("ingredients");
       setScreen("main");
+      void syncPendingInBackground();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกวัตถุดิบไม่สำเร็จ");
     } finally {
@@ -215,12 +348,10 @@ function App() {
     const form = new FormData(event.currentTarget);
     const file = form.get("image");
     let imageUrl = editingRecipe?.imageUrl;
-    let imageFileId = "";
     try {
+      const imagePayload = file instanceof File && file.size > 0 ? await fileToImagePayload(file) : null;
       if (file instanceof File && file.size > 0) {
-        const uploaded = await uploadRecipeImage(await fileToImagePayload(file));
-        imageUrl = uploaded.image_url;
-        imageFileId = uploaded.file_id;
+        imageUrl = imagePayload ? `data:${imagePayload.mimeType};base64,${imagePayload.base64}` : imageUrl;
       }
       const recipeId = editingRecipe?.id || `rec_${Date.now()}`;
       const itemIngredientIds = form.getAll("itemIngredientId").map(String);
@@ -262,10 +393,19 @@ function App() {
           .map((step) => step.trim())
           .filter(Boolean)
       };
-      await saveRecipe({ ...savedRecipe, imageFileId });
+      await enqueueMutation(
+        imagePayload
+          ? {
+              action: "saveRecipeWithImage",
+              entityId: recipeId,
+              payload: { recipe: savedRecipe, image: imagePayload }
+            }
+          : { action: "saveRecipe", entityId: recipeId, payload: savedRecipe }
+      );
       applyRecipeLocally(savedRecipe);
       setEditingRecipe(null);
       setScreen("detail");
+      void syncPendingInBackground();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกสูตรไม่สำเร็จ");
     } finally {
@@ -278,10 +418,11 @@ function App() {
     setSaving(true);
     setMessage("");
     try {
-      await deleteRecipe(recipeId);
+      await enqueueMutation({ action: "deleteRecipe", entityId: recipeId, payload: { id: recipeId } });
       removeRecipeLocally(recipeId);
       setTab("recipes");
       setScreen("main");
+      void syncPendingInBackground();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "ลบสูตรไม่สำเร็จ");
     } finally {
@@ -294,8 +435,9 @@ function App() {
     setSaving(true);
     setMessage("");
     try {
-      await deleteIngredient(ingredientId);
+      await enqueueMutation({ action: "deleteIngredient", entityId: ingredientId, payload: { id: ingredientId } });
       removeIngredientLocally(ingredientId);
+      void syncPendingInBackground();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "ลบวัตถุดิบไม่สำเร็จ");
     } finally {
@@ -325,6 +467,10 @@ function App() {
     setEditingIngredient(ingredient);
     setMessage("");
     setScreen("ingredientForm");
+  }
+
+  if (!accessKey) {
+    return <AccessGate authenticating={authenticating} message={authMessage} onSubmit={submitAccessKey} />;
   }
 
   return (
@@ -360,6 +506,7 @@ function App() {
         ) : (
           <>
             <main className="content">
+              <SyncStatusBar onRefresh={refreshFromSheet} refreshing={refreshing} state={syncState} />
               {message ? <div className="status-banner">{message}</div> : null}
               {loading ? (
                 <LoadingScreen />
@@ -433,6 +580,42 @@ function App() {
   );
 }
 
+function AccessGate({
+  authenticating,
+  message,
+  onSubmit
+}: {
+  authenticating: boolean;
+  message: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="app-shell">
+      <div className="phone">
+        <main className="access-screen">
+          <div className="access-screen__icon">
+            <KeyRound size={30} />
+          </div>
+          <div>
+            <h1>Drink Cost Studio</h1>
+            <p>ใส่รหัสลับของร้านเพื่อเปิดใช้งานบนเครื่องนี้</p>
+          </div>
+          <form onSubmit={onSubmit}>
+            {message ? <div className="status-banner" role="alert">{message}</div> : null}
+            <label>
+              รหัสลับ
+              <input autoComplete="current-password" minLength={8} name="accessKey" placeholder="รหัสลับของร้าน" required type="password" />
+            </label>
+            <button disabled={authenticating} type="submit">
+              {authenticating ? "กำลังตรวจสอบ..." : "เปิดใช้งาน"}
+            </button>
+          </form>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function HomeScreen({
   categories,
   recipes,
@@ -458,7 +641,6 @@ function HomeScreen({
           <h1>สวัสดี</h1>
           <p>วันนี้ขายดี ๆ ปัง ๆ นะ</p>
         </div>
-        <Bell size={22} />
       </header>
       <div className="search-row">
         <label className="search-box">
@@ -519,6 +701,42 @@ function HomeScreen({
         <p className="empty-text">{searchQuery.trim() ? "ไม่พบเมนูที่ค้นหา" : "ยังไม่มีสูตรเครื่องดื่ม"}</p>
       ) : null}
     </>
+  );
+}
+
+function SyncStatusBar({
+  onRefresh,
+  refreshing,
+  state
+}: {
+  onRefresh: () => void;
+  refreshing: boolean;
+  state: SyncState;
+}) {
+  const busy = refreshing || state.syncing;
+  const label = refreshing
+    ? "กำลังดึงข้อมูลจาก Google Sheet..."
+    : state.syncing
+      ? `กำลังซิงก์ ${state.pendingCount} รายการ...`
+      : state.lastError
+        ? `${state.pendingCount} รายการซิงก์ไม่สำเร็จ`
+        : state.pendingCount > 0
+          ? `${state.pendingCount} รายการรอซิงก์`
+          : state.lastSyncedAt
+            ? "ซิงก์แล้ว"
+            : "ข้อมูลในเครื่องพร้อมใช้";
+  const tone = state.lastError ? " sync-status--error" : state.pendingCount > 0 || busy ? " sync-status--pending" : "";
+
+  return (
+    <div aria-live="polite" className={`sync-status${tone}`} role="status">
+      <span>
+        <CheckCircle2 size={15} />
+        {label}
+      </span>
+      <button aria-label="รีเฟรชข้อมูลจาก Google Sheet" disabled={busy} onClick={onRefresh} title="รีเฟรชข้อมูลจาก Google Sheet" type="button">
+        <RefreshCw className={busy ? "is-spinning" : ""} size={16} />
+      </button>
+    </div>
   );
 }
 
@@ -932,6 +1150,21 @@ function RecipeForm({
   const [items, setItems] = useState<RecipeItem[]>(
     recipe?.items.length ? recipe.items : [{ ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }]
   );
+  const [imagePreview, setImagePreview] = useState(recipe?.imageUrl || "");
+  const imageObjectUrl = useRef<string | null>(null);
+
+  useEffect(
+    () => () => {
+      if (imageObjectUrl.current) URL.revokeObjectURL(imageObjectUrl.current);
+    },
+    []
+  );
+
+  function previewImage(file?: File) {
+    if (imageObjectUrl.current) URL.revokeObjectURL(imageObjectUrl.current);
+    imageObjectUrl.current = file && file.size > 0 ? URL.createObjectURL(file) : null;
+    setImagePreview(imageObjectUrl.current || recipe?.imageUrl || "");
+  }
 
   function updateItem(index: number, item: RecipeItem) {
     setItems((current) => current.map((row, rowIndex) => (rowIndex === index ? item : row)));
@@ -960,10 +1193,10 @@ function RecipeForm({
           </select>
         </label>
         <label className="upload-box">
-          <Package size={22} />
+          {imagePreview ? <img alt="ตัวอย่างรูปเมนู" className="upload-preview" src={imagePreview} /> : <Package size={22} />}
           <span>{recipe?.imageUrl ? "เปลี่ยนรูปเมนู" : "อัปโหลดรูปเมนู"}</span>
           <small>รูปจะถูกส่งเข้า Google Drive ผ่าน Apps Script</small>
-          <input accept="image/*" name="image" type="file" />
+          <input accept="image/*" name="image" onChange={(event) => previewImage(event.currentTarget.files?.[0])} type="file" />
         </label>
         <FormField defaultValue={recipe?.status || ""} label="ป้ายสถานะ" name="status" placeholder="เช่น ขายดี" />
         <FormField defaultValue={recipe?.sellingPrice || 35} label="ราคาขาย (บาท)" name="sellingPrice" placeholder="35" type="number" />

@@ -1,4 +1,4 @@
-const CACHE_NAME = "drink-cost-studio-v3";
+const CACHE_NAME = "drink-cost-studio-v4";
 const APP_SHELL = [
   "/",
   "/index.html",

@@ -5,6 +5,7 @@ const DEFAULT_APPS_SCRIPT_URL =
 
 export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
 const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v3";
+const ACCESS_KEY_STORAGE_KEY = "drink-cost-studio:access-key:v1";
 const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18" };
 
 type BootstrapResponse = {
@@ -22,9 +23,9 @@ export type AppData = {
   recipes: Recipe[];
 };
 
-type SaveIngredientInput = Omit<Ingredient, "costPerUnit"> & { costPerUnit?: number };
+export type SaveIngredientInput = Omit<Ingredient, "costPerUnit"> & { costPerUnit?: number };
 
-type SaveRecipeInput = {
+export type SaveRecipeInput = {
   id?: string;
   name: string;
   categoryId: CategoryId;
@@ -41,34 +42,48 @@ type SaveRecipeInput = {
   items?: RecipeItem[];
 };
 
-type UploadImageInput = {
+export type UploadImageInput = {
   fileName: string;
   mimeType: string;
   base64: string;
+  mutationId?: string;
 };
 
-export async function fetchAppData(): Promise<AppData> {
-  const url = new URL(APPS_SCRIPT_URL);
-  url.searchParams.set("action", "getBootstrapData");
-  url.searchParams.set("_", String(Date.now()));
-
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: { Accept: "application/json" }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Apps Script request failed: ${response.status}`);
-  }
-
-  const data = (await response.json()) as BootstrapResponse;
-  if (data.ok === false) {
-    throw new Error("Apps Script returned ok=false");
-  }
-
+export async function fetchAppData(options: { cache?: boolean } = {}): Promise<AppData> {
+  const data = (await postAction("getBootstrapData", {})) as BootstrapResponse;
   const normalized = normalizeBootstrapData(data);
-  cacheAppData(normalized);
+  if (options.cache !== false) cacheAppData(normalized);
   return normalized;
+}
+
+export class AccessDeniedError extends Error {
+  constructor(message = "รหัสลับไม่ถูกต้อง") {
+    super(message);
+    this.name = "AccessDeniedError";
+  }
+}
+
+export function getStoredAccessKey() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(ACCESS_KEY_STORAGE_KEY) || "";
+}
+
+export function storeAccessKey(accessKey: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, accessKey);
+}
+
+export function clearStoredAccessKey() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+}
+
+export async function authenticateAccessKey(accessKey: string) {
+  await postAction("authenticate", { access_key: accessKey }, false);
+}
+
+export function isAccessDeniedError(error: unknown): error is AccessDeniedError {
+  return error instanceof AccessDeniedError;
 }
 
 export function getCachedAppData(): AppData | null {
@@ -87,7 +102,14 @@ export function getCachedAppData(): AppData | null {
 export function cacheAppData(data: AppData) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(data));
+    const cacheable = {
+      ...data,
+      recipes: data.recipes.map((recipe) => ({
+        ...recipe,
+        imageUrl: recipe.imageUrl?.startsWith("data:") || recipe.imageUrl?.startsWith("blob:") ? undefined : recipe.imageUrl
+      }))
+    };
+    window.localStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(cacheable));
   } catch {
     // Storage can be unavailable in private mode or when quota is full.
   }
@@ -156,7 +178,12 @@ export async function toggleFavoriteRemote(recipeId: string, favorite?: boolean)
 }
 
 export async function uploadRecipeImage(input: UploadImageInput): Promise<{ image_url: string; file_id: string }> {
-  const data = await postAction("uploadRecipeImage", input);
+  const data = await postAction("uploadRecipeImage", {
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    base64: input.base64,
+    mutation_id: input.mutationId || ""
+  });
   return {
     image_url: text(data.image_url),
     file_id: text(data.file_id)
@@ -174,14 +201,16 @@ export async function fileToImagePayload(file: File): Promise<UploadImageInput> 
   };
 }
 
-async function postAction(action: string, payload: Record<string, unknown>) {
+async function postAction(action: string, payload: Record<string, unknown>, requiresAccess = true) {
   const url = new URL(APPS_SCRIPT_URL);
   url.searchParams.set("action", action);
+  const accessKey = requiresAccess ? getStoredAccessKey() : "";
+  if (requiresAccess && !accessKey) throw new AccessDeniedError("กรุณาใส่รหัสลับของร้าน");
 
   const response = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(requiresAccess ? { ...payload, access_key: accessKey } : payload)
   });
 
   if (!response.ok) {
@@ -190,6 +219,7 @@ async function postAction(action: string, payload: Record<string, unknown>) {
 
   const data = (await response.json()) as Record<string, unknown>;
   if (data.ok === false) {
+    if (text(data.code) === "UNAUTHORIZED") throw new AccessDeniedError(text(data.error) || "รหัสลับไม่ถูกต้อง");
     throw new Error(text(data.error) || `Apps Script ${action} returned ok=false`);
   }
   return data;

@@ -154,38 +154,45 @@ function setupSpreadsheet() {
 
   setup.forEach((config) => {
     const sheet = getOrCreateSheet(config.name);
-    sheet.clear();
-    sheet.getRange(1, 1, 1, config.headers.length).setValues([config.headers]);
-    if (config.rows.length) {
-      sheet.getRange(2, 1, config.rows.length, config.headers.length).setValues(config.rows);
-    }
+    ensureSheetHeaders(sheet, config.headers);
     sheet.setFrozenRows(1);
-    sheet.autoResizeColumns(1, config.headers.length);
+    sheet.autoResizeColumns(1, sheet.getLastColumn());
   });
 
-  SpreadsheetApp.getActive().toast("สร้างฐานข้อมูล Drink Cost Studio เรียบร้อยแล้ว", "Setup complete", 5);
+  SpreadsheetApp.getActive().toast("ตรวจสอบโครงสร้างชีตแล้ว ข้อมูลเดิมไม่ถูกลบ", "Setup complete", 5);
+}
+
+function ensureSheetHeaders(sheet, requiredHeaders) {
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
+    return;
+  }
+  const currentHeaders = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0].map(cleanId);
+  requiredHeaders.forEach((header) => {
+    if (currentHeaders.indexOf(header) >= 0) return;
+    currentHeaders.push(header);
+    sheet.getRange(1, currentHeaders.length).setValue(header);
+  });
 }
 
 function doGet(e) {
-  const params = (e && e.parameter) || {};
-  const action = params.action || "getBootstrapData";
-  try {
-    if (action === "getBootstrapData") return jsonResponse(getBootstrapData());
-    if (action === "getRecipe") return jsonResponse(getRecipe(params.id));
-    if (action === "getIngredients") return jsonResponse(readObjects(SHEETS.ingredients));
-    return jsonResponse({ ok: false, error: "Unknown action: " + action }, 404);
-  } catch (error) {
-    return jsonResponse({ ok: false, error: String(error) }, 500);
-  }
+  return jsonResponse({ ok: false, code: "POST_REQUIRED", error: "Use an authenticated POST request." }, 405);
 }
 
 function doPost(e) {
   const params = (e && e.parameter) || {};
   const action = params.action || "";
   const payload = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  let lock = null;
   try {
+    if (action === "authenticate") return jsonResponse(authenticateRequest(payload));
+    if (!isAuthorized(payload.access_key)) return unauthorizedResponse();
+    if (action === "getBootstrapData") return jsonResponse(getBootstrapData());
+    if (action === "getRecipe") return jsonResponse(getRecipe(payload.id));
+    if (action === "getIngredients") return jsonResponse({ ok: true, ingredients: readObjects(SHEETS.ingredients) });
+
+    lock = LockService.getScriptLock();
+    lock.waitLock(10000);
     if (action === "saveIngredient") return jsonResponse(saveObject(SHEETS.ingredients, payload));
     if (action === "saveRecipe") return jsonResponse(saveRecipe(payload));
     if (action === "deleteIngredient") return jsonResponse(deleteIngredient(payload.id));
@@ -197,8 +204,48 @@ function doPost(e) {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error) }, 500);
   } finally {
-    lock.releaseLock();
+    if (lock) lock.releaseLock();
   }
+}
+
+function configureAppSecret() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt("ตั้งรหัสลับ Drink Cost Studio", "กรอกรหัสอย่างน้อย 8 ตัว และเก็บไว้เฉพาะคุณ", ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+  const secret = cleanId(response.getResponseText());
+  if (secret.length < 8) {
+    ui.alert("รหัสลับต้องมีอย่างน้อย 8 ตัว");
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty("APP_SECRET_HASH", hashSecret(secret));
+  SpreadsheetApp.getActive().toast("ตั้งรหัสลับเรียบร้อยแล้ว", "Drink Cost Studio", 5);
+}
+
+function authenticateRequest(payload) {
+  if (!isAuthorized(payload.access_key)) return { ok: false, code: "UNAUTHORIZED", error: "รหัสลับไม่ถูกต้อง" };
+  return { ok: true, authorized: true };
+}
+
+function unauthorizedResponse() {
+  return jsonResponse({ ok: false, code: "UNAUTHORIZED", error: "รหัสลับไม่ถูกต้อง" }, 401);
+}
+
+function isAuthorized(secret) {
+  const expectedHash = PropertiesService.getScriptProperties().getProperty("APP_SECRET_HASH") || "";
+  if (!expectedHash || !secret) return false;
+  return secureEqual(expectedHash, hashSecret(String(secret)));
+}
+
+function hashSecret(secret) {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, secret, Utilities.Charset.UTF_8);
+  return bytes.map((value) => ((value + 256) % 256).toString(16).padStart(2, "0")).join("");
+}
+
+function secureEqual(left, right) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index++) difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  return difference === 0;
 }
 
 function getBootstrapData() {
@@ -386,9 +433,24 @@ function calculateCost(recipeId) {
 
 function uploadRecipeImage(payload) {
   const folderId = getImageFolderId();
+  const folder = DriveApp.getFolderById(folderId);
+  const mutationId = cleanId(payload.mutation_id).replace(/[^a-zA-Z0-9_-]/g, "");
+  const extension = payload.mimeType === "image/png" ? "png" : payload.mimeType === "image/webp" ? "webp" : "jpg";
+  const fileName = mutationId ? "sync-" + mutationId + "." + extension : payload.fileName || "recipe.jpg";
+  if (mutationId) {
+    const existingFiles = folder.getFilesByName(fileName);
+    if (existingFiles.hasNext()) {
+      const existingFile = existingFiles.next();
+      return {
+        ok: true,
+        file_id: existingFile.getId(),
+        image_url: "https://drive.google.com/thumbnail?id=" + existingFile.getId() + "&sz=w1200"
+      };
+    }
+  }
   const bytes = Utilities.base64Decode(payload.base64);
-  const blob = Utilities.newBlob(bytes, payload.mimeType || "image/jpeg", payload.fileName || "recipe.jpg");
-  const file = DriveApp.getFolderById(folderId).createFile(blob);
+  const blob = Utilities.newBlob(bytes, payload.mimeType || "image/jpeg", fileName);
+  const file = folder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   return {
     ok: true,
@@ -499,14 +561,9 @@ function jsonResponse(data, statusCode) {
 }
 
 function testGetBootstrapData() {
-  const response = doGet({ parameter: { action: "getBootstrapData" } });
-  Logger.log(response.getContent());
+  Logger.log(JSON.stringify(getBootstrapData()));
 }
 
 function testCalculateCost() {
-  const response = doPost({
-    parameter: { action: "calculateCost" },
-    postData: { contents: JSON.stringify({ recipe_id: "rec_thai_boba" }) }
-  });
-  Logger.log(response.getContent());
+  Logger.log(JSON.stringify(calculateCost("rec_thai_boba")));
 }
