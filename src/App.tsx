@@ -27,7 +27,6 @@ import cardCostBg from "./assets/UI/card-cost-bg.png";
 import cardRecipesBg from "./assets/UI/card-recipes-bg.png";
 import { DrinkArt } from "./components/DrinkArt";
 import { RecipeCard } from "./components/RecipeCard";
-import { categories as mockCategories, ingredients as mockIngredients, recipes as mockRecipes } from "./data/mockData";
 import {
   deleteIngredient,
   deleteRecipe,
@@ -69,10 +68,10 @@ function App() {
   const [targetMargin, setTargetMargin] = useState(60);
   const [deliveryFee, setDeliveryFee] = useState(30);
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe>(cachedData?.recipes[0] || mockRecipes[0]);
-  const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || mockCategories);
-  const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || mockRecipes);
-  const [ingredientList, setIngredientList] = useState<Ingredient[]>(cachedData?.ingredients || mockIngredients);
+  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
+  const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
+  const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || []);
+  const [ingredientList, setIngredientList] = useState<Ingredient[]>(cachedData?.ingredients || []);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
@@ -89,13 +88,13 @@ function App() {
     fetchAppData()
       .then((data) => {
         if (ignore) return;
-        applyData(data, selectedRecipe.id);
+        applyData(data, selectedRecipe?.id);
         setLoading(false);
       })
       .catch((error) => {
         if (ignore) return;
         console.warn(error);
-        setMessage("ยังต่อ Google Sheet ไม่ได้ เลยแสดงข้อมูลตัวอย่างก่อน");
+        setMessage("ยังเชื่อมต่อ Google Sheet ไม่ได้ กรุณาลองใหม่อีกครั้ง");
         setLoading(false);
       });
 
@@ -114,13 +113,13 @@ function App() {
     });
   }, [categoryList, ingredientList, recipes, searchQuery, selectedCategory, sortMode]);
 
-  const selectedCost = calculateCost(selectedRecipe, ingredientList);
+  const selectedCost = selectedRecipe ? calculateCost(selectedRecipe, ingredientList) : null;
 
   function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[] }, selectedId?: string) {
     setCategoryList(data.categories);
     setIngredientList(data.ingredients);
     setRecipes(data.recipes);
-    setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current.id)) || data.recipes[0] || mockRecipes[0]);
+    setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current?.id)) || data.recipes[0] || null);
   }
 
   async function refreshData(selectedId?: string) {
@@ -143,7 +142,7 @@ function App() {
   function removeRecipeLocally(recipeId: string) {
     const nextRecipes = recipes.filter((recipe) => recipe.id !== recipeId);
     setRecipes(nextRecipes);
-    setSelectedRecipe((current) => (current.id === recipeId ? nextRecipes[0] || mockRecipes[0] : current));
+    setSelectedRecipe((current) => (current?.id === recipeId ? nextRecipes[0] || null : current));
     cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: nextRecipes });
   }
 
@@ -155,10 +154,14 @@ function App() {
     }));
     setIngredientList(nextIngredients);
     setRecipes(nextRecipes);
-    setSelectedRecipe((current) => ({
-      ...current,
-      items: current.items.filter((item) => item.ingredientId !== ingredientId)
-    }));
+    setSelectedRecipe((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.filter((item) => item.ingredientId !== ingredientId)
+          }
+        : null
+    );
     cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes: nextRecipes });
   }
 
@@ -327,7 +330,7 @@ function App() {
   return (
     <div className="app-shell">
       <div className="phone">
-        {screen === "detail" ? (
+        {screen === "detail" && selectedRecipe ? (
           <RecipeDetail
             recipe={selectedRecipe}
             ingredients={ingredientList}
@@ -386,7 +389,7 @@ function App() {
                   onSearch={setSearchQuery}
                   onSort={() => setSortMode((mode) => (mode === "latest" ? "name" : mode === "name" ? "cost" : "latest"))}
                 />
-              ) : tab === "cost" ? (
+              ) : tab === "cost" && selectedRecipe && selectedCost ? (
                 <CostScreen
                   cost={selectedCost}
                   costMode={costMode}
@@ -402,6 +405,14 @@ function App() {
                   onDeliveryFee={setDeliveryFee}
                   onMargin={setTargetMargin}
                 />
+              ) : tab === "cost" ? (
+                <section className="loading-state">
+                  <div className="loading-state__icon">
+                    <WalletCards size={34} />
+                  </div>
+                  <h1>ยังไม่มีสูตรสำหรับคำนวณต้นทุน</h1>
+                  <p>เพิ่มสูตรเครื่องดื่มก่อน แล้วจึงเลือกสูตรที่ต้องการคำนวณ</p>
+                </section>
               ) : (
                 <IngredientsScreen
                   filter={ingredientFilter}
@@ -504,7 +515,9 @@ function HomeScreen({
           </button>
         ))}
       </div>
-      {!homeRecipes.length ? <p className="empty-text">ไม่พบเมนูที่ค้นหา</p> : null}
+      {!homeRecipes.length ? (
+        <p className="empty-text">{searchQuery.trim() ? "ไม่พบเมนูที่ค้นหา" : "ยังไม่มีสูตรเครื่องดื่ม"}</p>
+      ) : null}
     </>
   );
 }

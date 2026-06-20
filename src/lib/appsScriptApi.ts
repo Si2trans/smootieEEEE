@@ -1,11 +1,11 @@
-import { categories as mockCategories, ingredients as mockIngredients, recipes as mockRecipes } from "../data/mockData";
 import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "../types/app";
 
 const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
 
 export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
-const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v2";
+const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v3";
+const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18" };
 
 type BootstrapResponse = {
   ok?: boolean;
@@ -229,9 +229,9 @@ function normalizeBootstrapData(data: BootstrapResponse): AppData {
   const recipes = dedupeRecipes(normalizeRecipes(data.recipes || [], itemsByRecipe, favorites));
 
   return {
-    categories: categories.length ? [mockCategories[0], ...categories] : mockCategories,
-    ingredients: ingredients.length ? ingredients : mockIngredients,
-    recipes: recipes.length ? recipes : mockRecipes
+    categories: [ALL_CATEGORY, ...categories],
+    ingredients,
+    recipes
   };
 }
 
