@@ -1222,7 +1222,6 @@ function RecipeForm({
         <section className="recipe-items-editor">
           <div className="form-section-title">
             <h3>ส่วนผสมในสูตร</h3>
-            <button onClick={addItem} type="button"><Plus size={15} /> เพิ่ม</button>
           </div>
           {items.map((item, index) => (
             <RecipeItemEditor
@@ -1236,6 +1235,9 @@ function RecipeForm({
               onRemove={() => removeItem(index)}
             />
           ))}
+          <button className="add-line-button" onClick={addItem} type="button">
+            <Plus size={15} /> เพิ่ม
+          </button>
         </section>
         <label>
           วิธีทำ

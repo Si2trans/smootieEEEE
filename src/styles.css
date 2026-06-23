@@ -1371,13 +1371,15 @@ p {
   font-size: 14px;
 }
 
-.form-section-title button {
+.add-line-button {
+  width: fit-content;
   height: 32px;
   border-radius: 999px;
   padding: 0 11px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  justify-self: end;
   background: var(--green);
   color: #fff;
   font-size: 12px;
