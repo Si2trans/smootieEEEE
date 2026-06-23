@@ -1152,6 +1152,8 @@ function RecipeForm({
   );
   const [imagePreview, setImagePreview] = useState(recipe?.imageUrl || "");
   const imageObjectUrl = useRef<string | null>(null);
+  const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const pendingAddedItemIndex = useRef<number | null>(null);
 
   useEffect(
     () => () => {
@@ -1166,12 +1168,29 @@ function RecipeForm({
     setImagePreview(imageObjectUrl.current || recipe?.imageUrl || "");
   }
 
+  useEffect(() => {
+    const nextIndex = pendingAddedItemIndex.current;
+    if (nextIndex === null) return;
+    pendingAddedItemIndex.current = null;
+
+    window.requestAnimationFrame(() => {
+      const editor = itemRefs.current[nextIndex];
+      editor?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const ingredientInput = editor?.querySelector<HTMLInputElement>('input[name="itemIngredientName"]');
+      ingredientInput?.focus();
+      ingredientInput?.select();
+    });
+  }, [items.length]);
+
   function updateItem(index: number, item: RecipeItem) {
     setItems((current) => current.map((row, rowIndex) => (rowIndex === index ? item : row)));
   }
 
   function addItem() {
-    setItems((current) => [...current, { ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }]);
+    setItems((current) => {
+      pendingAddedItemIndex.current = current.length;
+      return [...current, { ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }];
+    });
   }
 
   function removeItem(index: number) {
@@ -1208,6 +1227,9 @@ function RecipeForm({
           {items.map((item, index) => (
             <RecipeItemEditor
               ingredientList={ingredients}
+              editorRef={(node) => {
+                itemRefs.current[index] = node;
+              }}
               item={item}
               key={`${item.ingredientId}-${index}`}
               onChange={(nextItem) => updateItem(index, nextItem)}
@@ -1226,11 +1248,13 @@ function RecipeForm({
 }
 
 function RecipeItemEditor({
+  editorRef,
   ingredientList,
   item,
   onChange,
   onRemove
 }: {
+  editorRef?: (node: HTMLDivElement | null) => void;
   ingredientList: Ingredient[];
   item: RecipeItem;
   onChange: (item: RecipeItem) => void;
@@ -1253,7 +1277,7 @@ function RecipeItemEditor({
   }
 
   return (
-    <div className="recipe-item-editor">
+    <div className="recipe-item-editor" ref={editorRef}>
       <label>
         วัตถุดิบ
         <div className="ingredient-combobox">
