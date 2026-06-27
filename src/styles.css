@@ -884,6 +884,18 @@ p {
   margin-top: 4px;
 }
 
+.detail-calculate-button {
+  width: calc(100% - 24px);
+  height: 40px;
+  margin: -4px 12px 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #3f9116, #236d08);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 8px 18px rgba(47, 123, 14, 0.2);
+}
+
 .segmented,
 .tabs {
   display: grid;
@@ -1132,6 +1144,27 @@ p {
 
 .delivery-card {
   padding: 14px;
+}
+
+.delivery-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.delivery-mode-row button {
+  min-height: 34px;
+  border-radius: 999px;
+  background: #f3f5f1;
+  color: #26311e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.delivery-mode-row button.is-active {
+  color: #fff;
+  background: linear-gradient(180deg, #3f9116, #236d08);
 }
 
 .platform-row {
@@ -1450,6 +1483,31 @@ p {
   text-align: center;
 }
 
+.recipe-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.save-line-button {
+  width: fit-content;
+  height: 30px;
+  border-radius: 999px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.save-line-button:disabled {
+  opacity: 0.68;
+}
+
 .remove-line-button {
   width: fit-content;
   height: 30px;
@@ -1458,7 +1516,6 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  justify-self: end;
   background: #fff1ef;
   color: #b42318;
   font-size: 12px;

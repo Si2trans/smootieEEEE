@@ -1,4 +1,4 @@
-export type CategoryId = "all" | "tea" | "milk" | "coffee" | "soda" | "smoothie";
+export type CategoryId = "all" | "tea" | "milk" | "coffee" | "soda" | "smoothie" | "toast" | "pangyen";
 
 export type Unit = "ml" | "g" | "piece";
 

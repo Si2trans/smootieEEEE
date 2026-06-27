@@ -57,6 +57,7 @@ type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
 type IngredientFilter = "all" | "base" | "topping";
 type SortMode = "latest" | "name" | "cost";
 type CostMode = "formula" | "price" | "profit";
+type DeliveryPricingMode = "offsetGp" | "markup";
 
 const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
@@ -79,6 +80,8 @@ function App() {
   const [costMode, setCostMode] = useState<CostMode>("formula");
   const [targetMargin, setTargetMargin] = useState(60);
   const [deliveryFee, setDeliveryFee] = useState(30);
+  const [deliveryPricingMode, setDeliveryPricingMode] = useState<DeliveryPricingMode>("offsetGp");
+  const [deliveryMarkup, setDeliveryMarkup] = useState(50);
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
@@ -307,6 +310,13 @@ function App() {
     setScreen("detail");
   }
 
+  function openCostCalculator(recipe: Recipe) {
+    setSelectedRecipe(recipe);
+    setCostMode("price");
+    setTab("cost");
+    setScreen("main");
+  }
+
   async function submitIngredient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -482,6 +492,7 @@ function App() {
             ingredients={ingredientList}
             saving={saving}
             onBack={() => setScreen("main")}
+            onCalculate={openCostCalculator}
             onDelete={removeRecipe}
             onEdit={startEditRecipe}
           />
@@ -541,15 +552,19 @@ function App() {
                   cost={selectedCost}
                   costMode={costMode}
                   deliveryFee={deliveryFee}
+                  deliveryMarkup={deliveryMarkup}
+                  deliveryPricingMode={deliveryPricingMode}
                   ingredients={ingredientList}
                   recipe={selectedRecipe}
                   targetMargin={targetMargin}
                   onChangeMode={setCostMode}
+                  onDeliveryMarkup={setDeliveryMarkup}
                   onChangeRecipe={() => {
                     setPickingCostRecipe(true);
                     setTab("recipes");
                   }}
                   onDeliveryFee={setDeliveryFee}
+                  onDeliveryPricingMode={setDeliveryPricingMode}
                   onMargin={setTargetMargin}
                 />
               ) : tab === "cost" ? (
@@ -821,6 +836,7 @@ function RecipeDetail({
   ingredients,
   saving,
   onBack,
+  onCalculate,
   onDelete,
   onEdit
 }: {
@@ -828,6 +844,7 @@ function RecipeDetail({
   ingredients: Ingredient[];
   saving: boolean;
   onBack: () => void;
+  onCalculate: (recipe: Recipe) => void;
   onDelete: (id: string) => void;
   onEdit: (recipe: Recipe) => void;
 }) {
@@ -860,6 +877,9 @@ function RecipeDetail({
         <Metric label="ราคาขาย" value={`${money(recipe.sellingPrice)} บาท`} />
         <Metric label="กำไร" value={`${money(cost.profit)} บาท`} />
       </section>
+      <button className="detail-calculate-button" onClick={() => onCalculate(recipe)} type="button">
+        คำนวณราคาขาย
+      </button>
       <section className="detail-section">
         <div className="detail-section__title">
           <h3>ส่วนผสม</h3>
@@ -899,10 +919,14 @@ function CostScreen({
   cost,
   costMode,
   deliveryFee,
+  deliveryMarkup,
+  deliveryPricingMode,
   targetMargin,
   onChangeMode,
+  onDeliveryMarkup,
   onChangeRecipe,
   onDeliveryFee,
+  onDeliveryPricingMode,
   onMargin
 }: {
   recipe: Recipe;
@@ -910,18 +934,28 @@ function CostScreen({
   cost: ReturnType<typeof calculateCost>;
   costMode: CostMode;
   deliveryFee: number;
+  deliveryMarkup: number;
+  deliveryPricingMode: DeliveryPricingMode;
   targetMargin: number;
   onChangeMode: (mode: CostMode) => void;
+  onDeliveryMarkup: (markup: number) => void;
   onChangeRecipe: () => void;
   onDeliveryFee: (fee: number) => void;
+  onDeliveryPricingMode: (mode: DeliveryPricingMode) => void;
   onMargin: (margin: number) => void;
 }) {
   const suggested = roundPrice(cost.totalCost / (1 - targetMargin / 100));
-  const deliveryPrice = deliveryFee >= 100 ? 0 : roundPrice(recipe.sellingPrice / (1 - deliveryFee / 100));
+  const deliveryPrice =
+    deliveryPricingMode === "markup"
+      ? roundPrice(recipe.sellingPrice * (1 + Math.max(deliveryMarkup, 0) / 100))
+      : deliveryFee >= 100
+        ? 0
+        : roundPrice(recipe.sellingPrice / (1 - deliveryFee / 100));
   const platformFeeAmount = (deliveryPrice * deliveryFee) / 100;
   const deliveryNetRevenue = deliveryPrice - platformFeeAmount;
   const deliveryProfit = deliveryNetRevenue - cost.totalCost;
   const deliveryMargin = deliveryPrice > 0 ? (deliveryProfit / deliveryPrice) * 100 : 0;
+  const deliveryMarkupAmount = deliveryPrice - recipe.sellingPrice;
   return (
     <>
       <TopTitle title="คำนวณต้นทุน" />
@@ -968,6 +1002,22 @@ function CostScreen({
           </section>
           <section className="delivery-card">
             <h3>หักเปอร์เซ็นต์เดลิเวอรี่</h3>
+            <div className="delivery-mode-row">
+              <button
+                className={deliveryPricingMode === "offsetGp" ? "is-active" : ""}
+                onClick={() => onDeliveryPricingMode("offsetGp")}
+                type="button"
+              >
+                ชดเชย GP
+              </button>
+              <button
+                className={deliveryPricingMode === "markup" ? "is-active" : ""}
+                onClick={() => onDeliveryPricingMode("markup")}
+                type="button"
+              >
+                บวก % จากราคาขาย
+              </button>
+            </div>
             <div className="platform-row">
               {deliveryPlatforms.map((platform) => (
                 <button
@@ -992,6 +1042,19 @@ function CostScreen({
                 value={deliveryFee}
               />
             </label>
+            {deliveryPricingMode === "markup" ? (
+              <label className="fee-input">
+                บวกจากราคาขายหน้าร้าน
+                <input
+                  min="0"
+                  max="300"
+                  onChange={(event) => onDeliveryMarkup(Number(event.currentTarget.value || 0))}
+                  type="number"
+                  value={deliveryMarkup}
+                />
+              </label>
+            ) : null}
+            {deliveryPricingMode === "markup" ? <CostLine label="ส่วนที่บวกจากหน้าร้าน" value={deliveryMarkupAmount} /> : null}
             <CostLine label="ค่าธรรมเนียมแพลตฟอร์ม" value={platformFeeAmount} />
             <CostLine label="รายรับหลังหัก" value={deliveryNetRevenue} />
             <div className="total-line">
@@ -1233,6 +1296,7 @@ function RecipeForm({
               key={`${item.ingredientId}-${index}`}
               onChange={(nextItem) => updateItem(index, nextItem)}
               onRemove={() => removeItem(index)}
+              saving={saving}
             />
           ))}
           <button className="add-line-button" onClick={addItem} type="button">
@@ -1254,13 +1318,15 @@ function RecipeItemEditor({
   ingredientList,
   item,
   onChange,
-  onRemove
+  onRemove,
+  saving
 }: {
   editorRef?: (node: HTMLDivElement | null) => void;
   ingredientList: Ingredient[];
   item: RecipeItem;
   onChange: (item: RecipeItem) => void;
   onRemove: () => void;
+  saving: boolean;
 }) {
   const selectedIngredient = ingredientList.find((ingredient) => ingredient.id === item.ingredientId);
   const [ingredientQuery, setIngredientQuery] = useState(selectedIngredient?.name || "");
@@ -1345,9 +1411,14 @@ function RecipeItemEditor({
           value={item.note || ""}
         />
       </label>
-      <button className="remove-line-button" onClick={onRemove} type="button">
-        <Trash2 size={14} /> ลบส่วนผสมนี้
-      </button>
+      <div className="recipe-item-actions">
+        <button className="save-line-button" disabled={saving} type="submit">
+          {saving ? "กำลังบันทึก..." : "บันทึกสูตร"}
+        </button>
+        <button className="remove-line-button" onClick={onRemove} type="button">
+          <Trash2 size={14} /> ลบส่วนผสมนี้
+        </button>
+      </div>
     </div>
   );
 }

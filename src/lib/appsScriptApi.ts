@@ -386,7 +386,7 @@ function inferImageKey(name: string, category: CategoryId) {
 
 function categoryId(value: unknown): CategoryId {
   const id = text(value) as CategoryId;
-  return ["all", "tea", "milk", "coffee", "soda", "smoothie"].includes(id) ? id : "tea";
+  return ["all", "tea", "milk", "coffee", "soda", "smoothie", "toast", "pangyen"].includes(id) ? id : "tea";
 }
 
 function unit(value: unknown): Unit {

@@ -7,6 +7,16 @@ const SHEETS = {
   favorites: "Favorites"
 };
 
+const DEFAULT_CATEGORIES = [
+  ["tea", "ชา", "CupSoda", "#f2b634", 1, true],
+  ["milk", "นม", "Milk", "#77bfd3", 2, true],
+  ["coffee", "กาแฟ", "Coffee", "#8a4f1e", 3, true],
+  ["smoothie", "สมูทตี้", "Cherry", "#f04646", 4, true],
+  ["soda", "โซดา", "GlassWater", "#6ea4e8", 5, true],
+  ["toast", "ปังปิ้ง", "Package", "#d48632", 6, true],
+  ["pangyen", "ปังเย็น", "GlassWater", "#8fb7f1", 7, true]
+];
+
 function setupSpreadsheet() {
   const setup = [
     {
@@ -21,13 +31,7 @@ function setupSpreadsheet() {
     {
       name: SHEETS.categories,
       headers: ["id", "label", "icon", "color", "sort_order", "active"],
-      rows: [
-        ["tea", "ชา", "CupSoda", "#f2b634", 1, true],
-        ["milk", "นม", "Milk", "#77bfd3", 2, true],
-        ["coffee", "กาแฟ", "Coffee", "#8a4f1e", 3, true],
-        ["smoothie", "สมูทตี้", "Cherry", "#f04646", 4, true],
-        ["soda", "โซดา", "GlassWater", "#6ea4e8", 5, true]
-      ]
+      rows: DEFAULT_CATEGORIES
     },
     {
       name: SHEETS.ingredients,
@@ -155,6 +159,7 @@ function setupSpreadsheet() {
   setup.forEach((config) => {
     const sheet = getOrCreateSheet(config.name);
     ensureSheetHeaders(sheet, config.headers);
+    if (config.name === SHEETS.categories) ensureDefaultCategories(sheet);
     sheet.setFrozenRows(1);
     sheet.autoResizeColumns(1, sheet.getLastColumn());
   });
@@ -172,6 +177,31 @@ function ensureSheetHeaders(sheet, requiredHeaders) {
     if (currentHeaders.indexOf(header) >= 0) return;
     currentHeaders.push(header);
     sheet.getRange(1, currentHeaders.length).setValue(header);
+  });
+}
+
+function ensureDefaultCategories(sheet) {
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 1) return;
+  const headers = values[0];
+  const idIndex = headers.indexOf("id");
+  if (idIndex < 0) return;
+  const existing = {};
+  for (let row = 1; row < values.length; row++) {
+    const id = cleanId(values[row][idIndex]);
+    if (id) existing[id] = true;
+  }
+  DEFAULT_CATEGORIES.forEach((category) => {
+    const id = cleanId(category[0]);
+    if (existing[id]) return;
+    appendObject(sheet, headers, {
+      id: category[0],
+      label: category[1],
+      icon: category[2],
+      color: category[3],
+      sort_order: category[4],
+      active: category[5]
+    });
   });
 }
 
@@ -252,12 +282,33 @@ function getBootstrapData() {
   return {
     ok: true,
     settings: readObjects(SHEETS.settings),
-    categories: readObjects(SHEETS.categories),
+    categories: getCategories(),
     ingredients: readObjects(SHEETS.ingredients),
     recipes: readObjects(SHEETS.recipes),
     recipeItems: readObjects(SHEETS.recipeItems),
     favorites: readObjects(SHEETS.favorites)
   };
+}
+
+function getCategories() {
+  const rows = readObjects(SHEETS.categories);
+  const byId = {};
+  rows.forEach((row) => {
+    if (row.id) byId[cleanId(row.id)] = row;
+  });
+  DEFAULT_CATEGORIES.forEach((category) => {
+    const id = cleanId(category[0]);
+    if (byId[id]) return;
+    rows.push({
+      id: category[0],
+      label: category[1],
+      icon: category[2],
+      color: category[3],
+      sort_order: category[4],
+      active: category[5]
+    });
+  });
+  return rows;
 }
 
 function getRecipe(id) {
