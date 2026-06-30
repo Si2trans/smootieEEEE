@@ -2,6 +2,7 @@ import {
   deleteIngredient,
   deleteRecipe,
   isAccessDeniedError,
+  safeRecipeImageUrl,
   saveIngredient,
   saveRecipe,
   uploadRecipeImage
@@ -116,7 +117,7 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
       const payload = mutation.payload as SaveRecipeInput | SaveRecipeWithImagePayload;
       const recipe = mutation.action === "saveRecipeWithImage" ? (payload as SaveRecipeWithImagePayload).recipe : (payload as SaveRecipeInput);
       const imagePayload = mutation.action === "saveRecipeWithImage" ? (payload as SaveRecipeWithImagePayload) : null;
-      const imageUrl = imagePayload?.uploaded?.image_url || (imagePayload ? imageDataUrl(imagePayload.image) : recipe.imageUrl);
+      const imageUrl = imagePayload?.uploaded?.image_url || (imagePayload ? imageDataUrl(imagePayload.image) : safeRecipeImageUrl(recipe.imageUrl));
       const existing = recipes.find((item) => item.id === mutation.entityId);
       const nextRecipe: Recipe = {
         id: recipe.id || mutation.entityId,
@@ -192,7 +193,10 @@ async function executeMutation(mutation: SyncMutation) {
     return;
   }
   if (mutation.action === "saveRecipe") {
-    await saveRecipe(mutation.payload as SaveRecipeInput);
+    const payload = sanitizeSaveRecipePayload(mutation.payload as SaveRecipeInput);
+    mutation.payload = payload;
+    await putMutation(mutation);
+    await saveRecipe(payload);
     return;
   }
   if (mutation.action === "deleteIngredient") {
@@ -215,6 +219,13 @@ async function executeMutation(mutation: SyncMutation) {
     imageUrl: payload.uploaded.image_url,
     imageFileId: payload.uploaded.file_id
   });
+}
+
+function sanitizeSaveRecipePayload(payload: SaveRecipeInput): SaveRecipeInput {
+  return {
+    ...payload,
+    imageUrl: safeRecipeImageUrl(payload.imageUrl)
+  };
 }
 
 function openDatabase() {

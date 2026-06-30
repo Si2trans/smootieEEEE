@@ -7,6 +7,7 @@ export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_A
 const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v3";
 const ACCESS_KEY_STORAGE_KEY = "drink-cost-studio:access-key:v1";
 const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18" };
+const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
 type BootstrapResponse = {
   ok?: boolean;
@@ -106,7 +107,7 @@ export function cacheAppData(data: AppData) {
       ...data,
       recipes: data.recipes.map((recipe) => ({
         ...recipe,
-        imageUrl: recipe.imageUrl?.startsWith("data:") || recipe.imageUrl?.startsWith("blob:") ? undefined : recipe.imageUrl
+        imageUrl: safeRecipeImageUrl(recipe.imageUrl)
       }))
     };
     window.localStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(cacheable));
@@ -144,8 +145,8 @@ export async function saveRecipe(input: SaveRecipeInput) {
       id: input.id || `rec_${Date.now()}`,
       name: input.name,
       category_id: input.categoryId,
-      image_url: input.imageUrl || "",
-      image_file_id: input.imageFileId || "",
+      image_url: safeRecipeImageUrl(input.imageUrl),
+      image_file_id: input.imageFileId || undefined,
       status: input.status || "",
       prep_time: Number(input.prepTime ?? 0),
       sweetness: Number(input.sweetness ?? 0),
@@ -364,12 +365,23 @@ function splitSteps(value: unknown) {
 }
 
 function normalizeDriveImageUrl(value: string) {
+  if (!safeRecipeImageUrl(value)) return "";
   if (!value) return "";
   const fileId =
     /[?&]id=([^&]+)/.exec(value)?.[1] ||
     /\/file\/d\/([^/]+)/.exec(value)?.[1] ||
     /\/d\/([^/]+)/.exec(value)?.[1];
   return fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w1200` : value;
+}
+
+export function safeRecipeImageUrl(value: unknown) {
+  const url = text(value);
+  if (!url) return undefined;
+  const lower = url.toLowerCase();
+  if (lower.startsWith("data:") || lower.startsWith("blob:")) return undefined;
+  if (url.length > MAX_SAFE_IMAGE_URL_LENGTH) return undefined;
+  if (!/^https?:\/\//i.test(url)) return undefined;
+  return url;
 }
 
 function inferImageKey(name: string, category: CategoryId) {

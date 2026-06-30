@@ -16,6 +16,7 @@ const DEFAULT_CATEGORIES = [
   ["toast", "ปังปิ้ง", "Package", "#d48632", 6, true],
   ["pangyen", "ปังเย็น", "GlassWater", "#8fb7f1", 7, true]
 ];
+const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
 function setupSpreadsheet() {
   const setup = [
@@ -321,6 +322,7 @@ function saveRecipe(payload) {
   const recipe = payload.recipe || payload;
   if (!recipe.id) recipe.id = "rec_" + Date.now();
   recipe.id = cleanId(recipe.id);
+  sanitizeRecipeImageFields(recipe);
   dedupeObjectsById(SHEETS.recipes, recipe.id);
   if (!recipe.created_at) recipe.created_at = new Date().toISOString();
   recipe.updated_at = new Date().toISOString();
@@ -336,6 +338,64 @@ function saveRecipe(payload) {
     dedupeRecipeItems(recipe.id);
   }
   return { ok: true, recipe: saved.item || recipe, mode: saved.mode || "saved" };
+}
+
+function sanitizeRecipeImageFields(recipe) {
+  const existing = getExistingRecipe(recipe.id);
+  const incomingUrl = Object.prototype.hasOwnProperty.call(recipe, "image_url") ? cleanId(recipe.image_url) : "";
+  const existingUrl = existing ? cleanId(existing.image_url) : "";
+  const incomingFileId = Object.prototype.hasOwnProperty.call(recipe, "image_file_id") ? cleanId(recipe.image_file_id) : "";
+  const existingFileId = existing ? cleanId(existing.image_file_id) : "";
+
+  if (isSafeImageUrl(incomingUrl)) {
+    recipe.image_url = incomingUrl;
+    recipe.image_file_id = incomingFileId || existingFileId;
+    return;
+  }
+
+  recipe.image_url = isSafeImageUrl(existingUrl) ? existingUrl : "";
+  recipe.image_file_id = recipe.image_url ? existingFileId : "";
+}
+
+function getExistingRecipe(recipeId) {
+  recipeId = cleanId(recipeId);
+  if (!recipeId) return null;
+  const rows = readObjects(SHEETS.recipes);
+  for (let index = 0; index < rows.length; index++) {
+    if (cleanId(rows[index].id) === recipeId) return rows[index];
+  }
+  return null;
+}
+
+function isSafeImageUrl(value) {
+  const url = cleanId(value);
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  if (lower.indexOf("data:") === 0 || lower.indexOf("blob:") === 0) return false;
+  if (url.length > MAX_SAFE_IMAGE_URL_LENGTH) return false;
+  return /^https?:\/\//i.test(url);
+}
+
+function cleanupInvalidRecipeImages() {
+  const sheet = getSheet(SHEETS.recipes);
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return { ok: true, cleaned: 0 };
+  const headers = values[0];
+  const imageUrlIndex = headers.indexOf("image_url");
+  const imageFileIdIndex = headers.indexOf("image_file_id");
+  if (imageUrlIndex < 0) throw new Error("Missing image_url column.");
+
+  let cleaned = 0;
+  for (let row = 1; row < values.length; row++) {
+    const imageUrl = cleanId(values[row][imageUrlIndex]);
+    if (!imageUrl || isSafeImageUrl(imageUrl)) continue;
+    sheet.getRange(row + 1, imageUrlIndex + 1).setValue("");
+    if (imageFileIdIndex >= 0) sheet.getRange(row + 1, imageFileIdIndex + 1).setValue("");
+    cleaned += 1;
+  }
+
+  SpreadsheetApp.getActive().toast("ล้าง image_url ที่ไม่ปลอดภัยแล้ว " + cleaned + " รายการ", "Drink Cost Studio", 5);
+  return { ok: true, cleaned: cleaned };
 }
 
 function deleteRecipe(recipeId) {

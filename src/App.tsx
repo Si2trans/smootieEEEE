@@ -38,6 +38,7 @@ import {
   getCachedAppData,
   getStoredAccessKey,
   isAccessDeniedError,
+  safeRecipeImageUrl,
   storeAccessKey
 } from "./lib/appsScriptApi";
 import {
@@ -357,7 +358,7 @@ function App() {
     setMessage("");
     const form = new FormData(event.currentTarget);
     const file = form.get("image");
-    let imageUrl = editingRecipe?.imageUrl;
+    let imageUrl = safeRecipeImageUrl(editingRecipe?.imageUrl);
     try {
       const imagePayload = file instanceof File && file.size > 0 ? await fileToImagePayload(file) : null;
       if (file instanceof File && file.size > 0) {
@@ -408,7 +409,7 @@ function App() {
           ? {
               action: "saveRecipeWithImage",
               entityId: recipeId,
-              payload: { recipe: savedRecipe, image: imagePayload }
+              payload: { recipe: { ...savedRecipe, imageUrl: safeRecipeImageUrl(editingRecipe?.imageUrl) }, image: imagePayload }
             }
           : { action: "saveRecipe", entityId: recipeId, payload: savedRecipe }
       );
