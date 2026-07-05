@@ -152,6 +152,15 @@ p {
   font-weight: 700;
 }
 
+.draft-banner {
+  border-radius: 12px;
+  background: #f1f8eb;
+  color: var(--green);
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .sync-status {
   min-height: 36px;
   display: flex;
@@ -802,7 +811,7 @@ p {
 
 .detail-tools {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin: 6px 0 12px;
 }

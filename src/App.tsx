@@ -13,6 +13,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Copy,
   RefreshCw,
   Search,
   Settings2,
@@ -89,6 +90,8 @@ function App() {
   const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || []);
   const [ingredientList, setIngredientList] = useState<Ingredient[]>(cachedData?.ingredients || []);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
+  const [draftRecipe, setDraftRecipe] = useState<Recipe | null>(null);
+  const [draftSourceName, setDraftSourceName] = useState("");
   const [editingIngredient, setEditingIngredient] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(Boolean(accessKey && !cachedData));
@@ -98,6 +101,7 @@ function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [syncState, setSyncState] = useState<SyncState>(() => getSyncState());
   const backgroundSyncRef = useRef<Promise<void> | null>(null);
+  const preferredSelectedRecipeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!accessKey) {
@@ -169,7 +173,8 @@ function App() {
     setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current?.id)) || data.recipes[0] || null);
   }
 
-  function syncPendingInBackground() {
+  function syncPendingInBackground(preferredSelectedId?: string) {
+    if (preferredSelectedId) preferredSelectedRecipeIdRef.current = preferredSelectedId;
     if (backgroundSyncRef.current) return backgroundSyncRef.current;
     const run = (async () => {
       let completed = 0;
@@ -185,8 +190,10 @@ function App() {
         if (completed === 0) return;
         const remoteData = await fetchAppData({ cache: false });
         if ((await getPendingMutationCount()) > 0) continue;
+        const selectedId = preferredSelectedRecipeIdRef.current || selectedRecipe?.id;
         cacheAppData(remoteData);
-        applyData(remoteData, selectedRecipe?.id);
+        applyData(remoteData, selectedId);
+        preferredSelectedRecipeIdRef.current = null;
         return;
       }
     })()
@@ -358,6 +365,7 @@ function App() {
     setMessage("");
     const form = new FormData(event.currentTarget);
     const file = form.get("image");
+    const recipeSource = editingRecipe ?? draftRecipe;
     let imageUrl = safeRecipeImageUrl(editingRecipe?.imageUrl);
     try {
       const imagePayload = file instanceof File && file.size > 0 ? await fileToImagePayload(file) : null;
@@ -389,12 +397,12 @@ function App() {
         id: recipeId,
         name: String(form.get("name") || "สูตรใหม่"),
         categoryId: String(form.get("categoryId") || "tea") as CategoryId,
-        imageKey: editingRecipe?.imageKey || "thai",
+        imageKey: recipeSource?.imageKey || "thai",
         imageUrl,
         status: String(form.get("status") || ""),
-        prepTime: editingRecipe?.prepTime || 0,
-        sweetness: editingRecipe?.sweetness || 0,
-        sizeOz: editingRecipe?.sizeOz || 0,
+        prepTime: recipeSource?.prepTime || 0,
+        sweetness: recipeSource?.sweetness || 0,
+        sizeOz: recipeSource?.sizeOz || 0,
         sellingPrice: Number(form.get("sellingPrice") || 35),
         favorite: editingRecipe?.favorite || false,
         rating: editingRecipe?.rating || 4.5,
@@ -415,8 +423,10 @@ function App() {
       );
       applyRecipeLocally(savedRecipe);
       setEditingRecipe(null);
+      setDraftRecipe(null);
+      setDraftSourceName("");
       setScreen("detail");
-      void syncPendingInBackground();
+      void syncPendingInBackground(savedRecipe.id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกสูตรไม่สำเร็จ");
     } finally {
@@ -458,12 +468,33 @@ function App() {
 
   function startAddRecipe() {
     setEditingRecipe(null);
+    setDraftRecipe(null);
+    setDraftSourceName("");
     setMessage("");
     setScreen("recipeForm");
   }
 
   function startEditRecipe(recipe: Recipe) {
     setEditingRecipe(recipe);
+    setDraftRecipe(null);
+    setDraftSourceName("");
+    setMessage("");
+    setScreen("recipeForm");
+  }
+
+  function startDuplicateRecipe(recipe: Recipe) {
+    setEditingRecipe(null);
+    setDraftRecipe({
+      ...recipe,
+      id: "",
+      name: "",
+      imageUrl: "",
+      favorite: false,
+      rating: 4.5,
+      items: recipe.items.map((item) => ({ ...item })),
+      steps: [...recipe.steps]
+    });
+    setDraftSourceName(recipe.name);
     setMessage("");
     setScreen("recipeForm");
   }
@@ -495,6 +526,7 @@ function App() {
             onBack={() => setScreen("main")}
             onCalculate={openCostCalculator}
             onDelete={removeRecipe}
+            onDuplicate={startDuplicateRecipe}
             onEdit={startEditRecipe}
           />
         ) : screen === "ingredientForm" ? (
@@ -509,9 +541,11 @@ function App() {
           <RecipeForm
             categories={categoryList}
             ingredients={ingredientList}
+            isDuplicate={Boolean(draftRecipe && !editingRecipe)}
             message={message}
-            recipe={editingRecipe}
+            recipe={editingRecipe ?? draftRecipe}
             saving={saving}
+            sourceName={draftSourceName}
             onBack={() => setScreen("main")}
             onSubmit={submitRecipe}
           />
@@ -839,6 +873,7 @@ function RecipeDetail({
   onBack,
   onCalculate,
   onDelete,
+  onDuplicate,
   onEdit
 }: {
   recipe: Recipe;
@@ -847,6 +882,7 @@ function RecipeDetail({
   onBack: () => void;
   onCalculate: (recipe: Recipe) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (recipe: Recipe) => void;
   onEdit: (recipe: Recipe) => void;
 }) {
   const cost = calculateCost(recipe, ingredients);
@@ -863,6 +899,9 @@ function RecipeDetail({
       <div className="detail-tools">
         <button onClick={() => onEdit(recipe)} type="button">
           <Pencil size={16} /> แก้ไข
+        </button>
+        <button onClick={() => onDuplicate(recipe)} type="button">
+          <Copy size={16} /> คัดลอกสูตร
         </button>
         <button disabled={saving} onClick={() => onDelete(recipe.id)} type="button">
           <Trash2 size={16} /> ลบ
@@ -1197,17 +1236,21 @@ function IngredientForm({
 function RecipeForm({
   categories,
   ingredients,
+  isDuplicate,
   message,
   recipe,
   saving,
+  sourceName,
   onBack,
   onSubmit
 }: {
   categories: Category[];
   ingredients: Ingredient[];
+  isDuplicate: boolean;
   message: string;
   recipe: Recipe | null;
   saving: boolean;
+  sourceName: string;
   onBack: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -1263,9 +1306,13 @@ function RecipeForm({
 
   return (
     <main className="form-screen">
-      <TopTitle left={<button className="bare-button" onClick={onBack} type="button"><ChevronLeft size={24} /></button>} title={recipe ? "แก้สูตร" : "เพิ่มสูตร"} />
+      <TopTitle
+        left={<button className="bare-button" onClick={onBack} type="button"><ChevronLeft size={24} /></button>}
+        title={isDuplicate ? "เพิ่มสูตรจากสูตรเดิม" : recipe ? "แก้สูตร" : "เพิ่มสูตร"}
+      />
       <form className="form-card" onSubmit={onSubmit}>
         {message ? <div className="status-banner">{message}</div> : null}
+        {isDuplicate && sourceName ? <div className="draft-banner">คัดลอกจาก: {sourceName}</div> : null}
         <FormField defaultValue={recipe?.name} label="ชื่อเมนู" name="name" placeholder="เช่น ชาไทยไข่มุก" required />
         <label>
           หมวดหมู่
