@@ -2016,3 +2016,53 @@ p {
   }
 
 }
+
+@media print {
+  html,
+  body,
+  #root {
+    width: 57mm !important;
+    min-width: 57mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  .app-shell,
+  .phone {
+    width: 57mm !important;
+    max-width: 57mm !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
+  .print-receipt,
+  .print-receipt--preview {
+    position: static !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: block !important;
+    width: 57mm !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  .receipt-paper {
+    width: 57mm !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+}
