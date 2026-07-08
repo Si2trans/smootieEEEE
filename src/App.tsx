@@ -388,24 +388,18 @@ function App() {
   }
 
   function addOrderItem(recipe: Recipe) {
-    setOrderItems((current) => {
-      const existing = current.find((item) => item.recipeId === recipe.id && !item.note);
-      if (existing) {
-        return current.map((item) => (item.id === existing.id ? { ...item, qty: item.qty + 1 } : item));
+    setOrderItems((current) => [
+      ...current,
+      {
+        id: `order_${Date.now()}_${recipe.id}`,
+        recipeId: recipe.id,
+        name: recipe.name,
+        qty: 1,
+        unitPrice: recipe.sellingPrice || 0,
+        note: "",
+        addons: []
       }
-      return [
-        ...current,
-        {
-          id: `order_${Date.now()}_${recipe.id}`,
-          recipeId: recipe.id,
-          name: recipe.name,
-          qty: 1,
-          unitPrice: recipe.sellingPrice || 0,
-          note: "",
-          addons: []
-        }
-      ];
-    });
+    ]);
   }
 
   function updateOrderItem(itemId: string, patch: Partial<OrderItem>) {
@@ -1161,9 +1155,10 @@ function OrderScreen({
   onUpdateAddon: (itemId: string, addonId: string, patch: Partial<OrderAddon>) => void;
   onUpdateItem: (itemId: string, patch: Partial<OrderItem>) => void;
 }) {
+  const normalizedOrderSearch = searchQuery.trim().toLowerCase();
   const visibleRecipes = recipes
-    .filter((recipe) => recipe.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
-    .slice(0, 12);
+    .filter((recipe) => recipe.name.toLowerCase().includes(normalizedOrderSearch))
+    .slice(0, normalizedOrderSearch ? 12 : 3);
   const channels = ["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"];
 
   return (
