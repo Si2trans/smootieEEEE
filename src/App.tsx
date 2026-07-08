@@ -1216,12 +1216,19 @@ function OrderScreen({
             <div className="order-item__grid">
               <label>
                 จำนวน
-                <input
-                  min="1"
-                  onChange={(event) => onUpdateItem(item.id, { qty: Number(event.currentTarget.value || 1) })}
-                  type="number"
-                  value={item.qty}
-                />
+                <div className="qty-stepper">
+                  <button
+                    disabled={item.qty <= 1}
+                    onClick={() => onUpdateItem(item.id, { qty: item.qty - 1 })}
+                    type="button"
+                  >
+                    -
+                  </button>
+                  <strong>{item.qty}</strong>
+                  <button onClick={() => onUpdateItem(item.id, { qty: item.qty + 1 })} type="button">
+                    +
+                  </button>
+                </div>
               </label>
               <label>
                 ราคา
