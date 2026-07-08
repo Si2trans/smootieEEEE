@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
   Coffee,
   CupSoda,
   GlassWater,
@@ -54,12 +55,26 @@ import type { SyncState } from "./lib/syncQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
 import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "./types/app";
 
-type Tab = "home" | "recipes" | "cost" | "ingredients";
+type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
 type IngredientFilter = "all" | "base" | "topping";
 type SortMode = "latest" | "name" | "cost";
 type CostMode = "formula" | "price" | "profit";
 type DeliveryPricingMode = "offsetGp" | "markup";
+type OrderAddon = {
+  id: string;
+  name: string;
+  price: number;
+};
+type OrderItem = {
+  id: string;
+  recipeId: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  note: string;
+  addons: OrderAddon[];
+};
 
 const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
@@ -84,6 +99,14 @@ function App() {
   const [deliveryFee, setDeliveryFee] = useState(30);
   const [deliveryPricingMode, setDeliveryPricingMode] = useState<DeliveryPricingMode>("offsetGp");
   const [deliveryMarkup, setDeliveryMarkup] = useState(50);
+  const [orderChannel, setOrderChannel] = useState("หน้าร้าน");
+  const [orderCustomerName, setOrderCustomerName] = useState("");
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [orderNote, setOrderNote] = useState("");
+  const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
+  const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
+  const [orderSearch, setOrderSearch] = useState("");
+  const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
@@ -165,6 +188,7 @@ function App() {
   }, [categoryList, ingredientList, recipes, searchQuery, selectedCategory, sortMode]);
 
   const selectedCost = selectedRecipe ? calculateCost(selectedRecipe, ingredientList) : null;
+  const orderTotal = orderItems.reduce((sum, item) => sum + orderItemTotal(item), 0);
 
   function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[] }, selectedId?: string) {
     setCategoryList(data.categories);
@@ -323,6 +347,97 @@ function App() {
     setCostMode("price");
     setTab("cost");
     setScreen("main");
+  }
+
+  function addOrderItem(recipe: Recipe) {
+    setOrderItems((current) => {
+      const existing = current.find((item) => item.recipeId === recipe.id && !item.note);
+      if (existing) {
+        return current.map((item) => (item.id === existing.id ? { ...item, qty: item.qty + 1 } : item));
+      }
+      return [
+        ...current,
+        {
+          id: `order_${Date.now()}_${recipe.id}`,
+          recipeId: recipe.id,
+          name: recipe.name,
+          qty: 1,
+          unitPrice: recipe.sellingPrice || 0,
+          note: "",
+          addons: []
+        }
+      ];
+    });
+  }
+
+  function updateOrderItem(itemId: string, patch: Partial<OrderItem>) {
+    setOrderItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...patch,
+              qty: Math.max(1, patch.qty ?? item.qty),
+              unitPrice: Math.max(0, patch.unitPrice ?? item.unitPrice)
+            }
+          : item
+      )
+    );
+  }
+
+  function removeOrderItem(itemId: string) {
+    setOrderItems((current) => current.filter((item) => item.id !== itemId));
+  }
+
+  function addOrderAddon(itemId: string) {
+    setOrderItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              addons: [...item.addons, { id: `addon_${Date.now()}`, name: "", price: 0 }]
+            }
+          : item
+      )
+    );
+  }
+
+  function updateOrderAddon(itemId: string, addonId: string, patch: Partial<OrderAddon>) {
+    setOrderItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              addons: item.addons.map((addon) =>
+                addon.id === addonId ? { ...addon, ...patch, price: Math.max(0, patch.price ?? addon.price) } : addon
+              )
+            }
+          : item
+      )
+    );
+  }
+
+  function removeOrderAddon(itemId: string, addonId: string) {
+    setOrderItems((current) =>
+      current.map((item) =>
+        item.id === itemId ? { ...item, addons: item.addons.filter((addon) => addon.id !== addonId) } : item
+      )
+    );
+  }
+
+  function printOrderReceipt() {
+    if (!orderItems.length) {
+      setMessage("เพิ่มเมนูในออเดอร์ก่อนสร้างบิล");
+      return;
+    }
+    setMessage("");
+    if (!orderNumber.trim()) setOrderNumber(makeOrderNumber());
+    setOrderPrintedAt(new Date());
+    setReceiptPreviewOpen(true);
+  }
+
+  function printReceiptPreview() {
+    window.setTimeout(() => window.print(), 80);
   }
 
   async function submitIngredient(event: FormEvent<HTMLFormElement>) {
@@ -582,6 +697,30 @@ function App() {
                   onSearch={setSearchQuery}
                   onSort={() => setSortMode((mode) => (mode === "latest" ? "name" : mode === "name" ? "cost" : "latest"))}
                 />
+              ) : tab === "orders" ? (
+                <OrderScreen
+                  channel={orderChannel}
+                  customerName={orderCustomerName}
+                  items={orderItems}
+                  note={orderNote}
+                  orderNumber={orderNumber}
+                  recipes={recipes}
+                  searchQuery={orderSearch}
+                  total={orderTotal}
+                  onAddItem={addOrderItem}
+                  onAddAddon={addOrderAddon}
+                  onChannel={setOrderChannel}
+                  onClear={() => setOrderItems([])}
+                  onCustomerName={setOrderCustomerName}
+                  onNote={setOrderNote}
+                  onOrderNumber={setOrderNumber}
+                  onPrint={printOrderReceipt}
+                  onRemoveItem={removeOrderItem}
+                  onRemoveAddon={removeOrderAddon}
+                  onSearch={setOrderSearch}
+                  onUpdateAddon={updateOrderAddon}
+                  onUpdateItem={updateOrderItem}
+                />
               ) : tab === "cost" && selectedRecipe && selectedCost ? (
                 <CostScreen
                   cost={selectedCost}
@@ -623,6 +762,18 @@ function App() {
               )}
             </main>
             <BottomNav active={tab} onAdd={startAddRecipe} onChange={setTab} />
+            <OrderReceipt
+              channel={orderChannel}
+              customerName={orderCustomerName}
+              items={orderItems}
+              note={orderNote}
+              onClose={() => setReceiptPreviewOpen(false)}
+              onPrint={printReceiptPreview}
+              orderNumber={orderNumber.trim() || makeOrderNumber()}
+              previewOpen={receiptPreviewOpen}
+              printedAt={orderPrintedAt}
+              total={orderTotal}
+            />
           </>
         )}
       </div>
@@ -863,6 +1014,277 @@ function RecipesScreen({
         ))}
       </div>
     </>
+  );
+}
+
+function OrderScreen({
+  channel,
+  customerName,
+  items,
+  note,
+  orderNumber,
+  recipes,
+  searchQuery,
+  total,
+  onAddAddon,
+  onAddItem,
+  onChannel,
+  onClear,
+  onCustomerName,
+  onNote,
+  onOrderNumber,
+  onPrint,
+  onRemoveAddon,
+  onRemoveItem,
+  onSearch,
+  onUpdateAddon,
+  onUpdateItem
+}: {
+  channel: string;
+  customerName: string;
+  items: OrderItem[];
+  note: string;
+  orderNumber: string;
+  recipes: Recipe[];
+  searchQuery: string;
+  total: number;
+  onAddAddon: (itemId: string) => void;
+  onAddItem: (recipe: Recipe) => void;
+  onChannel: (channel: string) => void;
+  onClear: () => void;
+  onCustomerName: (name: string) => void;
+  onNote: (note: string) => void;
+  onOrderNumber: (value: string) => void;
+  onPrint: () => void;
+  onRemoveAddon: (itemId: string, addonId: string) => void;
+  onRemoveItem: (itemId: string) => void;
+  onSearch: (query: string) => void;
+  onUpdateAddon: (itemId: string, addonId: string, patch: Partial<OrderAddon>) => void;
+  onUpdateItem: (itemId: string, patch: Partial<OrderItem>) => void;
+}) {
+  const visibleRecipes = recipes
+    .filter((recipe) => recipe.name.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    .slice(0, 12);
+  const channels = ["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"];
+
+  return (
+    <>
+      <TopTitle title="ออเดอร์" />
+      <section className="order-panel">
+        <label>
+          เลขออเดอร์
+          <input onChange={(event) => onOrderNumber(event.currentTarget.value)} placeholder="#BH-143025" value={orderNumber} />
+        </label>
+        <label>
+          ชื่อลูกค้า
+          <input onChange={(event) => onCustomerName(event.currentTarget.value)} placeholder="เช่น พลอย" value={customerName} />
+        </label>
+        <div className="order-channel-row">
+          {channels.map((item) => (
+            <button className={channel === item ? "is-active" : ""} key={item} onClick={() => onChannel(item)} type="button">
+              {item}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <label className="search-box search-box--screen">
+        <Search size={18} />
+        <input onChange={(event) => onSearch(event.currentTarget.value)} placeholder="ค้นหาเมนูเพื่อเพิ่มเข้าบิล..." value={searchQuery} />
+      </label>
+
+      <section className="order-menu-list">
+        {visibleRecipes.map((recipe) => (
+          <button key={recipe.id} onClick={() => onAddItem(recipe)} type="button">
+            <span>
+              <strong>{recipe.name}</strong>
+              <small>{money(recipe.sellingPrice)} บาท</small>
+            </span>
+            <Plus size={18} />
+          </button>
+        ))}
+        {!visibleRecipes.length ? <p className="empty-text">ไม่พบเมนูที่ค้นหา</p> : null}
+      </section>
+
+      <section className="order-cart">
+        <div className="order-cart__title">
+          <h3>รายการบิล</h3>
+          {items.length ? <button onClick={onClear} type="button">ล้าง</button> : null}
+        </div>
+        {items.map((item) => (
+          <div className="order-item" key={item.id}>
+            <div className="order-item__header">
+              <strong>{item.name}</strong>
+              <button onClick={() => onRemoveItem(item.id)} type="button">
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="order-item__grid">
+              <label>
+                จำนวน
+                <input
+                  min="1"
+                  onChange={(event) => onUpdateItem(item.id, { qty: Number(event.currentTarget.value || 1) })}
+                  type="number"
+                  value={item.qty}
+                />
+              </label>
+              <label>
+                ราคา
+                <input
+                  min="0"
+                  onChange={(event) => onUpdateItem(item.id, { unitPrice: Number(event.currentTarget.value || 0) })}
+                  type="number"
+                  value={item.unitPrice}
+                />
+              </label>
+              <div>
+                <span>รวม</span>
+                <strong>{money(orderItemTotal(item))} บาท</strong>
+              </div>
+            </div>
+            <div className="order-addon-section">
+              {item.addons.map((addon) => (
+                <div className="order-addon-row" key={addon.id}>
+                  <input
+                    onChange={(event) => onUpdateAddon(item.id, addon.id, { name: event.currentTarget.value })}
+                    placeholder="ท็อปปิ้ง"
+                    value={addon.name}
+                  />
+                  <input
+                    min="0"
+                    onChange={(event) => onUpdateAddon(item.id, addon.id, { price: Number(event.currentTarget.value || 0) })}
+                    placeholder="ราคา"
+                    type="number"
+                    value={addon.price}
+                  />
+                  <button onClick={() => onRemoveAddon(item.id, addon.id)} type="button">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <button className="add-addon-button" onClick={() => onAddAddon(item.id)} type="button">
+                <Plus size={14} /> ท็อปปิ้ง
+              </button>
+            </div>
+            <label>
+              หมายเหตุ
+              <input
+                onChange={(event) => onUpdateItem(item.id, { note: event.currentTarget.value })}
+                placeholder="เช่น หวานน้อย แยกน้ำแข็ง"
+                value={item.note}
+              />
+            </label>
+          </div>
+        ))}
+        {!items.length ? <p className="empty-text">ยังไม่มีรายการในบิล แตะ + ที่เมนูเพื่อเพิ่ม</p> : null}
+      </section>
+
+      <label className="order-note">
+        หมายเหตุออเดอร์
+        <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ลูกค้าขอรับเร็ว แยกถุง" value={note} />
+      </label>
+
+      <section className="order-summary">
+        <span>ยอดรวม</span>
+        <strong>{money(total)} บาท</strong>
+      </section>
+      <button className="submit-button" onClick={onPrint} type="button">สร้างบิล</button>
+    </>
+  );
+}
+
+function OrderReceipt({
+  channel,
+  customerName,
+  items,
+  note,
+  onClose,
+  onPrint,
+  orderNumber,
+  previewOpen,
+  printedAt,
+  total
+}: {
+  channel: string;
+  customerName: string;
+  items: OrderItem[];
+  note: string;
+  onClose: () => void;
+  onPrint: () => void;
+  orderNumber: string;
+  previewOpen: boolean;
+  printedAt: Date;
+  total: number;
+}) {
+  return (
+    <div className={`print-receipt${previewOpen ? " print-receipt--preview" : ""}`} aria-hidden={!previewOpen}>
+      {previewOpen ? (
+        <div className="receipt-preview-actions">
+          <button onClick={onClose} type="button">ปิด</button>
+          <button onClick={onPrint} type="button">พิมพ์ / บันทึก PDF</button>
+        </div>
+      ) : null}
+      <div className="receipt-paper">
+        <img alt="" className="receipt-logo" src="/store-logo.png" />
+        <div className="receipt-store-name">BLEND HOUSE</div>
+        <div className="receipt-order-number">{orderNumber}</div>
+        <div className="receipt-bar">ORDER RECEIPT</div>
+        <div className="receipt-meta">
+          <div>
+            <span>ช่องทาง</span>
+            <strong>{channel}</strong>
+          </div>
+          <div>
+            <span>เวลา</span>
+            <strong>{formatReceiptDate(printedAt)}</strong>
+          </div>
+          {customerName.trim() ? (
+            <div>
+              <span>ลูกค้า</span>
+              <strong>คุณ {customerName.trim()}</strong>
+            </div>
+          ) : null}
+        </div>
+        <div className="receipt-divider" />
+        <section>
+          <h3>รายการสินค้า</h3>
+          {items.map((item) => (
+            <div className="receipt-item" key={item.id}>
+              <div>
+                <strong>{item.qty} x {item.name}</strong>
+                <span>{money(orderItemTotal(item))}</span>
+              </div>
+              {item.addons.length || item.note ? (
+                <p>
+                  {[
+                    ...item.addons
+                      .filter((addon) => addon.name.trim() || addon.price > 0)
+                      .map((addon) => `${addon.name.trim() || "ท็อปปิ้ง"} +${money(addon.price)}`),
+                    ...item.note.split("\n").filter(Boolean)
+                  ].map((line) => `- ${line}`).join("\n")}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </section>
+        <div className="receipt-divider" />
+        <div className="receipt-total">
+          <span>ยอดรวม</span>
+          <strong>{money(total)} บาท</strong>
+        </div>
+        {note ? (
+          <>
+            <div className="receipt-divider" />
+            <section className="receipt-note">
+              <strong>หมายเหตุ</strong>
+              <p>{note}</p>
+            </section>
+          </>
+        ) : null}
+        <div className="receipt-thanks">ขอบคุณที่อุดหนุน</div>
+      </div>
+    </div>
   );
 }
 
@@ -1511,6 +1933,7 @@ function BottomNav({ active, onChange, onAdd }: { active: Tab; onChange: (tab: T
   const tabs: Array<{ id: Tab; label: string; icon: ElementType }> = [
     { id: "home", label: "หน้าแรก", icon: Home },
     { id: "recipes", label: "สูตร", icon: Grid2X2 },
+    { id: "orders", label: "ออเดอร์", icon: ClipboardList },
     { id: "cost", label: "ต้นทุน", icon: ShoppingBag },
     { id: "ingredients", label: "วัตถุดิบ", icon: WalletCards }
   ];
@@ -1597,6 +2020,24 @@ function filterRecipes(recipes: Recipe[], query: string, categories: Category[])
       .toLowerCase()
       .includes(keyword);
   });
+}
+
+function makeOrderNumber() {
+  const now = new Date();
+  return `#BH-${padNumber(now.getHours())}${padNumber(now.getMinutes())}${padNumber(now.getSeconds())}`;
+}
+
+function formatReceiptDate(date: Date) {
+  return `${padNumber(date.getDate())}/${padNumber(date.getMonth() + 1)}/${date.getFullYear()} ${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
+}
+
+function orderItemTotal(item: OrderItem) {
+  const addonTotal = item.addons.reduce((sum, addon) => sum + addon.price, 0);
+  return (item.unitPrice + addonTotal) * item.qty;
+}
+
+function padNumber(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 export default App;
