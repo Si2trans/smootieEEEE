@@ -108,6 +108,7 @@ function App() {
   const [orderSearch, setOrderSearch] = useState("");
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   const [generatingReceiptPdf, setGeneratingReceiptPdf] = useState(false);
+  const [generatingReceiptImage, setGeneratingReceiptImage] = useState(false);
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
@@ -438,22 +439,49 @@ function App() {
     setReceiptPreviewOpen(true);
   }
 
-  async function exportReceiptPdf() {
+  async function renderReceiptImage() {
     const paper = receiptPaperRef.current;
-    if (!paper || generatingReceiptPdf) return;
+    if (!paper) throw new Error("Receipt preview is not ready.");
+
+    const { toPng } = await import("html-to-image");
+    const bounds = paper.getBoundingClientRect();
+    const dataUrl = await toPng(paper, {
+      backgroundColor: "#ffffff",
+      cacheBust: true,
+      pixelRatio: 4
+    });
+
+    return { dataUrl, heightPx: bounds.height, widthPx: bounds.width };
+  }
+
+  async function exportReceiptImage() {
+    if (!receiptPaperRef.current || generatingReceiptImage) return;
+
+    setGeneratingReceiptImage(true);
+    setMessage("");
+    try {
+      const { dataUrl } = await renderReceiptImage();
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `receipt-${sanitizeFileName(orderNumber.trim() || makeOrderNumber())}.png`;
+      link.click();
+    } catch (error) {
+      console.error(error);
+      setMessage("บันทึกรูปไม่สำเร็จ ลองเปิดบิลใหม่อีกครั้ง");
+    } finally {
+      setGeneratingReceiptImage(false);
+    }
+  }
+
+  async function exportReceiptPdf() {
+    if (!receiptPaperRef.current || generatingReceiptPdf) return;
 
     setGeneratingReceiptPdf(true);
     setMessage("");
     try {
-      const [{ toPng }, { jsPDF }] = await Promise.all([import("html-to-image"), import("jspdf")]);
-      const bounds = paper.getBoundingClientRect();
+      const [{ dataUrl, heightPx, widthPx }, { jsPDF }] = await Promise.all([renderReceiptImage(), import("jspdf")]);
       const paperWidthMm = 57;
-      const paperHeightMm = Math.max(30, (bounds.height / bounds.width) * paperWidthMm);
-      const dataUrl = await toPng(paper, {
-        backgroundColor: "#ffffff",
-        cacheBust: true,
-        pixelRatio: 3
-      });
+      const paperHeightMm = Math.max(30, (heightPx / widthPx) * paperWidthMm);
       const pdf = new jsPDF({
         orientation: "portrait",
         unit: "mm",
@@ -794,10 +822,12 @@ function App() {
             <OrderReceipt
               channel={orderChannel}
               customerName={orderCustomerName}
+              isGeneratingImage={generatingReceiptImage}
               items={orderItems}
               isGeneratingPdf={generatingReceiptPdf}
               note={orderNote}
               onClose={() => setReceiptPreviewOpen(false)}
+              onExportImage={exportReceiptImage}
               onExportPdf={exportReceiptPdf}
               orderNumber={orderNumber.trim() || makeOrderNumber()}
               previewOpen={receiptPreviewOpen}
@@ -1228,10 +1258,12 @@ function OrderScreen({
 function OrderReceipt({
   channel,
   customerName,
+  isGeneratingImage,
   isGeneratingPdf,
   items,
   note,
   onClose,
+  onExportImage,
   onExportPdf,
   orderNumber,
   previewOpen,
@@ -1241,10 +1273,12 @@ function OrderReceipt({
 }: {
   channel: string;
   customerName: string;
+  isGeneratingImage: boolean;
   isGeneratingPdf: boolean;
   items: OrderItem[];
   note: string;
   onClose: () => void;
+  onExportImage: () => void;
   onExportPdf: () => void;
   orderNumber: string;
   previewOpen: boolean;
@@ -1257,6 +1291,9 @@ function OrderReceipt({
       {previewOpen ? (
         <div className="receipt-preview-actions">
           <button onClick={onClose} type="button">ปิด</button>
+          <button disabled={isGeneratingImage} onClick={onExportImage} type="button">
+            {isGeneratingImage ? "กำลังบันทึกรูป..." : "บันทึกรูป"}
+          </button>
           <button disabled={isGeneratingPdf} onClick={onExportPdf} type="button">
             {isGeneratingPdf ? "กำลังสร้าง PDF..." : "บันทึก PDF"}
           </button>

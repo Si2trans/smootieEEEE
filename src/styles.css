@@ -1588,9 +1588,9 @@ p {
 }
 
 .receipt-preview-actions {
-  width: min(100%, 320px);
+  width: min(100%, 340px);
   display: grid;
-  grid-template-columns: 0.8fr 1.2fr;
+  grid-template-columns: 0.7fr 1fr 1fr;
   gap: 8px;
   position: sticky;
   top: 0;
@@ -1606,7 +1606,7 @@ p {
   font-weight: 900;
 }
 
-.receipt-preview-actions button:last-child {
+.receipt-preview-actions button:nth-child(2) {
   background: var(--green);
   color: #fff;
 }
