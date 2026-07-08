@@ -388,6 +388,7 @@ function App() {
   }
 
   function addOrderItem(recipe: Recipe) {
+    const unitPrice = orderUnitPrice(recipe, orderChannel);
     setOrderItems((current) => [
       ...current,
       {
@@ -395,7 +396,7 @@ function App() {
         recipeId: recipe.id,
         name: recipe.name,
         qty: 1,
-        unitPrice: recipe.sellingPrice || 0,
+        unitPrice,
         note: "",
         addons: []
       }
@@ -606,6 +607,7 @@ function App() {
         sweetness: recipeSource?.sweetness || 0,
         sizeOz: recipeSource?.sizeOz || 0,
         sellingPrice: Number(form.get("sellingPrice") || 35),
+        deliveryPrice: Number(form.get("deliveryPrice") || form.get("sellingPrice") || 35),
         favorite: editingRecipe?.favorite || false,
         rating: editingRecipe?.rating || 4.5,
         items,
@@ -1192,7 +1194,7 @@ function OrderScreen({
           <button key={recipe.id} onClick={() => onAddItem(recipe)} type="button">
             <span>
               <strong>{recipe.name}</strong>
-              <small>{money(recipe.sellingPrice)} บาท</small>
+              <small>{money(orderUnitPrice(recipe, channel))} บาท</small>
             </span>
             <Plus size={18} />
           </button>
@@ -1567,6 +1569,7 @@ function RecipeDetail({
       <section className="metric-row">
         <Metric label="ต้นทุน" value={`${money(cost.totalCost)} บาท`} />
         <Metric label="ราคาขาย" value={`${money(recipe.sellingPrice)} บาท`} />
+        <Metric label="ราคาเดลิ" value={`${money(recipe.deliveryPrice || recipe.sellingPrice)} บาท`} />
         <Metric label="กำไร" value={`${money(cost.profit)} บาท`} />
       </section>
       <button className="detail-calculate-button" onClick={() => onCalculate(recipe)} type="button">
@@ -1982,6 +1985,13 @@ function RecipeForm({
         </label>
         <FormField defaultValue={recipe?.status || ""} label="ป้ายสถานะ" name="status" placeholder="เช่น ขายดี" />
         <FormField defaultValue={recipe?.sellingPrice || 35} label="ราคาขาย (บาท)" name="sellingPrice" placeholder="35" type="number" />
+        <FormField
+          defaultValue={recipe?.deliveryPrice || recipe?.sellingPrice || 35}
+          label="ราคาเดลิเวอรี่ (บาท)"
+          name="deliveryPrice"
+          placeholder="เช่น 75"
+          type="number"
+        />
         <section className="recipe-items-editor">
           <div className="form-section-title">
             <h3>ส่วนผสมในสูตร</h3>
@@ -2264,6 +2274,11 @@ function formatReceiptDate(date: Date) {
 function orderItemTotal(item: OrderItem) {
   const addonTotal = item.addons.reduce((sum, addon) => sum + addon.price, 0);
   return (item.unitPrice + addonTotal) * item.qty;
+}
+
+function orderUnitPrice(recipe: Recipe, channel: string) {
+  if (channel === "หน้าร้าน") return Number(recipe.sellingPrice || 0);
+  return Number(recipe.deliveryPrice || recipe.sellingPrice || 0);
 }
 
 function sanitizeFileName(value: string) {

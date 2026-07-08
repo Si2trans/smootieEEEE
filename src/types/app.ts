@@ -39,6 +39,7 @@ export type Recipe = {
   sweetness: number;
   sizeOz: number;
   sellingPrice: number;
+  deliveryPrice?: number;
   favorite: boolean;
   rating: number;
   items: RecipeItem[];

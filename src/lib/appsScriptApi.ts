@@ -37,6 +37,7 @@ export type SaveRecipeInput = {
   sweetness: number;
   sizeOz: number;
   sellingPrice: number;
+  deliveryPrice?: number;
   favorite?: boolean;
   rating?: number;
   steps?: string[];
@@ -152,6 +153,7 @@ export async function saveRecipe(input: SaveRecipeInput) {
       sweetness: Number(input.sweetness ?? 0),
       size_oz: Number(input.sizeOz ?? 0),
       selling_price: Number(input.sellingPrice ?? 0),
+      delivery_price: Number(input.deliveryPrice ?? input.sellingPrice ?? 0),
       favorite: Boolean(input.favorite),
       rating: Number(input.rating || 4.5),
       steps: (input.steps || []).filter(Boolean).join("|"),
@@ -315,6 +317,7 @@ function normalizeRecipes(
         sweetness: number(row.sweetness, 75),
         sizeOz: number(row.size_oz || row.sizeOz, 16),
         sellingPrice: number(row.selling_price || row.sellingPrice, 0),
+        deliveryPrice: number(row.delivery_price || row.deliveryPrice || row.selling_price || row.sellingPrice, 0),
         favorite: row.favorite === undefined || row.favorite === null || row.favorite === "" ? favorites.has(id) : bool(row.favorite, false),
         rating: number(row.rating, 4.5),
         items: itemsByRecipe.get(id) || [],

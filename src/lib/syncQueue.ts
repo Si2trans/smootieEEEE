@@ -130,6 +130,7 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
         sweetness: recipe.sweetness,
         sizeOz: recipe.sizeOz,
         sellingPrice: recipe.sellingPrice,
+        deliveryPrice: recipe.deliveryPrice ?? recipe.sellingPrice,
         favorite: recipe.favorite || false,
         rating: recipe.rating || 0,
         items: recipe.items || [],
