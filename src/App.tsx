@@ -26,7 +26,7 @@ import {
   WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ElementType, FormEvent, ReactNode } from "react";
+import type { ElementType, FormEvent, ReactNode, RefObject } from "react";
 import cardCostBg from "./assets/UI/card-cost-bg.png";
 import cardRecipesBg from "./assets/UI/card-recipes-bg.png";
 import { DrinkArt } from "./components/DrinkArt";
@@ -107,6 +107,7 @@ function App() {
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
+  const [generatingReceiptPdf, setGeneratingReceiptPdf] = useState(false);
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
@@ -125,6 +126,7 @@ function App() {
   const [syncState, setSyncState] = useState<SyncState>(() => getSyncState());
   const backgroundSyncRef = useRef<Promise<void> | null>(null);
   const preferredSelectedRecipeIdRef = useRef<string | null>(null);
+  const receiptPaperRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!accessKey) {
@@ -436,8 +438,35 @@ function App() {
     setReceiptPreviewOpen(true);
   }
 
-  function printReceiptPreview() {
-    window.setTimeout(() => window.print(), 80);
+  async function exportReceiptPdf() {
+    const paper = receiptPaperRef.current;
+    if (!paper || generatingReceiptPdf) return;
+
+    setGeneratingReceiptPdf(true);
+    setMessage("");
+    try {
+      const [{ toPng }, { jsPDF }] = await Promise.all([import("html-to-image"), import("jspdf")]);
+      const bounds = paper.getBoundingClientRect();
+      const paperWidthMm = 57;
+      const paperHeightMm = Math.max(30, (bounds.height / bounds.width) * paperWidthMm);
+      const dataUrl = await toPng(paper, {
+        backgroundColor: "#ffffff",
+        cacheBust: true,
+        pixelRatio: 3
+      });
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: [paperWidthMm, paperHeightMm]
+      });
+      pdf.addImage(dataUrl, "PNG", 0, 0, paperWidthMm, paperHeightMm);
+      pdf.save(`receipt-${sanitizeFileName(orderNumber.trim() || makeOrderNumber())}.pdf`);
+    } catch (error) {
+      console.error(error);
+      setMessage("สร้าง PDF ไม่สำเร็จ ลองเปิดบิลใหม่อีกครั้ง");
+    } finally {
+      setGeneratingReceiptPdf(false);
+    }
   }
 
   async function submitIngredient(event: FormEvent<HTMLFormElement>) {
@@ -766,12 +795,14 @@ function App() {
               channel={orderChannel}
               customerName={orderCustomerName}
               items={orderItems}
+              isGeneratingPdf={generatingReceiptPdf}
               note={orderNote}
               onClose={() => setReceiptPreviewOpen(false)}
-              onPrint={printReceiptPreview}
+              onExportPdf={exportReceiptPdf}
               orderNumber={orderNumber.trim() || makeOrderNumber()}
               previewOpen={receiptPreviewOpen}
               printedAt={orderPrintedAt}
+              receiptRef={receiptPaperRef}
               total={orderTotal}
             />
           </>
@@ -1197,24 +1228,28 @@ function OrderScreen({
 function OrderReceipt({
   channel,
   customerName,
+  isGeneratingPdf,
   items,
   note,
   onClose,
-  onPrint,
+  onExportPdf,
   orderNumber,
   previewOpen,
   printedAt,
+  receiptRef,
   total
 }: {
   channel: string;
   customerName: string;
+  isGeneratingPdf: boolean;
   items: OrderItem[];
   note: string;
   onClose: () => void;
-  onPrint: () => void;
+  onExportPdf: () => void;
   orderNumber: string;
   previewOpen: boolean;
   printedAt: Date;
+  receiptRef: RefObject<HTMLDivElement>;
   total: number;
 }) {
   return (
@@ -1222,10 +1257,12 @@ function OrderReceipt({
       {previewOpen ? (
         <div className="receipt-preview-actions">
           <button onClick={onClose} type="button">ปิด</button>
-          <button onClick={onPrint} type="button">พิมพ์ / บันทึก PDF</button>
+          <button disabled={isGeneratingPdf} onClick={onExportPdf} type="button">
+            {isGeneratingPdf ? "กำลังสร้าง PDF..." : "บันทึก PDF"}
+          </button>
         </div>
       ) : null}
-      <div className="receipt-paper">
+      <div className="receipt-paper" ref={receiptRef}>
         <img alt="" className="receipt-logo" src="/store-logo.png" />
         <div className="receipt-store-name">BLEND HOUSE</div>
         <div className="receipt-order-number">{orderNumber}</div>
@@ -2034,6 +2071,10 @@ function formatReceiptDate(date: Date) {
 function orderItemTotal(item: OrderItem) {
   const addonTotal = item.addons.reduce((sum, addon) => sum + addon.price, 0);
   return (item.unitPrice + addonTotal) * item.qty;
+}
+
+function sanitizeFileName(value: string) {
+  return value.replace(/[^a-zA-Z0-9ก-๙_-]+/g, "-").replace(/^-+|-+$/g, "") || "order";
 }
 
 function padNumber(value: number) {
