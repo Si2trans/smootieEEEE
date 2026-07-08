@@ -80,6 +80,8 @@ type ReceiptPaperSettings = {
   presetId: ReceiptPaperPresetId;
   paperWidthMm: number;
   paddingXMm: number;
+  paddingLeftMm: number;
+  paddingRightMm: number;
   paddingTopMm: number;
   paddingBottomMm: number;
   xOffsetMm: number;
@@ -94,6 +96,8 @@ const defaultReceiptPaperSettings: ReceiptPaperSettings = {
   presetId: "a9max77",
   paperWidthMm: 77,
   paddingXMm: 0,
+  paddingLeftMm: 0,
+  paddingRightMm: 0,
   paddingTopMm: 5,
   paddingBottomMm: 7,
   xOffsetMm: 0,
@@ -1324,6 +1328,9 @@ function OrderReceipt({
   onSettingsChange: (settings: ReceiptPaperSettings) => void;
   total: number;
 }) {
+  const splitSidePadding = settings.paddingLeftMm !== settings.paddingRightMm;
+  const sidePaddingValue = splitSidePadding ? "" : settings.paddingLeftMm;
+
   function updateSettings(next: Partial<ReceiptPaperSettings>) {
     onSettingsChange(normalizeReceiptPaperSettings({ ...settings, ...next }));
   }
@@ -1370,10 +1377,33 @@ function OrderReceipt({
             <label>
               ขอบข้าง
               <input
+                disabled={splitSidePadding}
                 inputMode="decimal"
-                onChange={(event) => updateSettings({ paddingXMm: Number(event.currentTarget.value) })}
+                onChange={(event) => {
+                  const value = Number(event.currentTarget.value);
+                  updateSettings({ paddingXMm: value, paddingLeftMm: value, paddingRightMm: value });
+                }}
+                placeholder={splitSidePadding ? "แยก" : undefined}
+                type={splitSidePadding ? "text" : "number"}
+                value={sidePaddingValue}
+              />
+            </label>
+            <label>
+              ขอบซ้าย
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ paddingLeftMm: Number(event.currentTarget.value) })}
                 type="number"
-                value={settings.paddingXMm}
+                value={settings.paddingLeftMm}
+              />
+            </label>
+            <label>
+              ขอบขวา
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ paddingRightMm: Number(event.currentTarget.value) })}
+                type="number"
+                value={settings.paddingRightMm}
               />
             </label>
             <label>
@@ -1421,7 +1451,7 @@ function OrderReceipt({
         ref={receiptRef}
         style={{
           width: `${settings.paperWidthMm}mm`,
-          padding: `${settings.paddingTopMm}mm ${settings.paddingXMm}mm ${settings.paddingBottomMm}mm`
+          padding: `${settings.paddingTopMm}mm ${settings.paddingRightMm}mm ${settings.paddingBottomMm}mm ${settings.paddingLeftMm}mm`
         }}
       >
         <img alt="" className="receipt-logo" src="/store-logo.png" />
@@ -2250,10 +2280,15 @@ function getStoredReceiptPaperSettings(): ReceiptPaperSettings {
 
 function normalizeReceiptPaperSettings(settings: ReceiptPaperSettings): ReceiptPaperSettings {
   const presetId = receiptPaperPresets.some((preset) => preset.id === settings.presetId) ? settings.presetId : "a9max77";
+  const sidePadding = clampNumber(settings.paddingXMm, 0, 20, defaultReceiptPaperSettings.paddingXMm);
+  const leftPadding = clampNumber(settings.paddingLeftMm, 0, 20, sidePadding);
+  const rightPadding = clampNumber(settings.paddingRightMm, 0, 20, sidePadding);
   return {
     presetId,
     paperWidthMm: clampNumber(settings.paperWidthMm, 40, 120, defaultReceiptPaperSettings.paperWidthMm),
-    paddingXMm: clampNumber(settings.paddingXMm, 0, 20, defaultReceiptPaperSettings.paddingXMm),
+    paddingXMm: leftPadding === rightPadding ? leftPadding : sidePadding,
+    paddingLeftMm: leftPadding,
+    paddingRightMm: rightPadding,
     paddingTopMm: clampNumber(settings.paddingTopMm, 0, 20, defaultReceiptPaperSettings.paddingTopMm),
     paddingBottomMm: clampNumber(settings.paddingBottomMm, 0, 30, defaultReceiptPaperSettings.paddingBottomMm),
     xOffsetMm: clampNumber(settings.xOffsetMm, -20, 20, defaultReceiptPaperSettings.xOffsetMm),
