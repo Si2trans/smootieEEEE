@@ -1587,14 +1587,20 @@ p {
   background: rgba(238, 241, 235, 0.98);
 }
 
-.receipt-preview-actions {
+.receipt-preview-toolbar {
   width: min(100%, 340px);
   display: grid;
-  grid-template-columns: 0.7fr 1fr 1fr;
   gap: 8px;
   position: sticky;
   top: 0;
   z-index: 1;
+}
+
+.receipt-preview-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 0.7fr 1fr 1fr;
+  gap: 8px;
 }
 
 .receipt-preview-actions button {
@@ -1609,6 +1615,38 @@ p {
 .receipt-preview-actions button:nth-child(2) {
   background: var(--green);
   color: #fff;
+}
+
+.receipt-paper-controls {
+  display: grid;
+  grid-template-columns: 1.35fr repeat(4, minmax(0, 0.8fr));
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e3e9df;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 20px rgba(31, 48, 22, 0.08);
+}
+
+.receipt-paper-controls label {
+  display: grid;
+  gap: 4px;
+  color: #56604f;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.receipt-paper-controls input,
+.receipt-paper-controls select {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid #dfe6da;
+  border-radius: 9px;
+  padding: 0 7px;
+  background: #fff;
+  color: #17210f;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .receipt-paper {
@@ -1994,6 +2032,7 @@ p {
     display: block;
   }
 
+  .receipt-preview-toolbar,
   .receipt-preview-actions {
     display: none;
   }
@@ -2015,6 +2054,16 @@ p {
     border: 0;
   }
 
+}
+
+@media (max-width: 420px) {
+  .receipt-preview-toolbar {
+    width: min(100%, 352px);
+  }
+
+  .receipt-paper-controls {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
 }
 
 @media print {

@@ -75,10 +75,36 @@ type OrderItem = {
   note: string;
   addons: OrderAddon[];
 };
+type ReceiptPaperPresetId = "a9max77" | "a956" | "receipt57" | "custom";
+type ReceiptPaperSettings = {
+  presetId: ReceiptPaperPresetId;
+  paperWidthMm: number;
+  paddingXMm: number;
+  paddingTopMm: number;
+  paddingBottomMm: number;
+  xOffsetMm: number;
+  pixelRatio: number;
+};
 
 const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
 const units: Unit[] = ["ml", "g", "piece"];
+const receiptPaperStorageKey = "drink-cost-receipt-paper";
+const defaultReceiptPaperSettings: ReceiptPaperSettings = {
+  presetId: "a9max77",
+  paperWidthMm: 77,
+  paddingXMm: 0,
+  paddingTopMm: 0,
+  paddingBottomMm: 0,
+  xOffsetMm: 0,
+  pixelRatio: 4
+};
+const receiptPaperPresets: Array<{ id: ReceiptPaperPresetId; label: string; paperWidthMm: number }> = [
+  { id: "a9max77", label: "A9 Max 77mm", paperWidthMm: 77 },
+  { id: "a956", label: "A9 56mm", paperWidthMm: 56 },
+  { id: "receipt57", label: "57mm", paperWidthMm: 57 },
+  { id: "custom", label: "กำหนดเอง", paperWidthMm: 77 }
+];
 const deliveryPlatforms = [
   { id: "lineman", name: "LINE MAN", fee: 30, icon: "/LINEMAN.png" },
   { id: "grab", name: "Grab", fee: 32, icon: "/GRAB.png" },
@@ -109,6 +135,7 @@ function App() {
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   const [generatingReceiptPdf, setGeneratingReceiptPdf] = useState(false);
   const [generatingReceiptImage, setGeneratingReceiptImage] = useState(false);
+  const [receiptPaperSettings, setReceiptPaperSettings] = useState<ReceiptPaperSettings>(() => getStoredReceiptPaperSettings());
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
@@ -179,6 +206,10 @@ function App() {
       window.removeEventListener("online", handleOnline);
     };
   }, [accessKey, cachedData]);
+
+  useEffect(() => {
+    localStorage.setItem(receiptPaperStorageKey, JSON.stringify(receiptPaperSettings));
+  }, [receiptPaperSettings]);
 
   const filteredRecipes = useMemo(() => {
     const base = selectedCategory === "all" ? recipes : recipes.filter((recipe) => recipe.categoryId === selectedCategory);
@@ -445,11 +476,12 @@ function App() {
 
     const { toPng } = await import("html-to-image");
     const bounds = paper.getBoundingClientRect();
-    const dataUrl = await toPng(paper, {
+    const rawDataUrl = await toPng(paper, {
       backgroundColor: "#ffffff",
       cacheBust: true,
-      pixelRatio: 4
+      pixelRatio: receiptPaperSettings.pixelRatio
     });
+    const dataUrl = await shiftImageDataUrl(rawDataUrl, receiptPaperSettings.xOffsetMm, bounds.width, receiptPaperSettings.paperWidthMm);
 
     return { dataUrl, heightPx: bounds.height, widthPx: bounds.width };
   }
@@ -480,7 +512,7 @@ function App() {
     setMessage("");
     try {
       const [{ dataUrl, heightPx, widthPx }, { jsPDF }] = await Promise.all([renderReceiptImage(), import("jspdf")]);
-      const paperWidthMm = 57;
+      const paperWidthMm = receiptPaperSettings.paperWidthMm;
       const paperHeightMm = Math.max(30, (heightPx / widthPx) * paperWidthMm);
       const pdf = new jsPDF({
         orientation: "portrait",
@@ -833,6 +865,8 @@ function App() {
               previewOpen={receiptPreviewOpen}
               printedAt={orderPrintedAt}
               receiptRef={receiptPaperRef}
+              settings={receiptPaperSettings}
+              onSettingsChange={setReceiptPaperSettings}
               total={orderTotal}
             />
           </>
@@ -1269,6 +1303,8 @@ function OrderReceipt({
   previewOpen,
   printedAt,
   receiptRef,
+  settings,
+  onSettingsChange,
   total
 }: {
   channel: string;
@@ -1284,22 +1320,92 @@ function OrderReceipt({
   previewOpen: boolean;
   printedAt: Date;
   receiptRef: RefObject<HTMLDivElement>;
+  settings: ReceiptPaperSettings;
+  onSettingsChange: (settings: ReceiptPaperSettings) => void;
   total: number;
 }) {
+  function updateSettings(next: Partial<ReceiptPaperSettings>) {
+    onSettingsChange(normalizeReceiptPaperSettings({ ...settings, ...next }));
+  }
+
+  function changePreset(value: ReceiptPaperPresetId) {
+    const preset = receiptPaperPresets.find((item) => item.id === value) || receiptPaperPresets[0];
+    updateSettings({
+      presetId: value,
+      paperWidthMm: value === "custom" ? settings.paperWidthMm : preset.paperWidthMm
+    });
+  }
+
   return (
     <div className={`print-receipt${previewOpen ? " print-receipt--preview" : ""}`} aria-hidden={!previewOpen}>
       {previewOpen ? (
-        <div className="receipt-preview-actions">
-          <button onClick={onClose} type="button">ปิด</button>
-          <button disabled={isGeneratingImage} onClick={onExportImage} type="button">
-            {isGeneratingImage ? "กำลังบันทึกรูป..." : "บันทึกรูป"}
-          </button>
-          <button disabled={isGeneratingPdf} onClick={onExportPdf} type="button">
-            {isGeneratingPdf ? "กำลังสร้าง PDF..." : "บันทึก PDF"}
-          </button>
+        <div className="receipt-preview-toolbar">
+          <div className="receipt-preview-actions">
+            <button onClick={onClose} type="button">ปิด</button>
+            <button disabled={isGeneratingImage} onClick={onExportImage} type="button">
+              {isGeneratingImage ? "กำลังบันทึกรูป..." : "บันทึกรูป"}
+            </button>
+            <button disabled={isGeneratingPdf} onClick={onExportPdf} type="button">
+              {isGeneratingPdf ? "กำลังสร้าง PDF..." : "บันทึก PDF"}
+            </button>
+          </div>
+          <div className="receipt-paper-controls">
+            <label>
+              กระดาษ
+              <select onChange={(event) => changePreset(event.currentTarget.value as ReceiptPaperPresetId)} value={settings.presetId}>
+                {receiptPaperPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>{preset.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              กว้าง
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ paperWidthMm: Number(event.currentTarget.value), presetId: "custom" })}
+                type="number"
+                value={settings.paperWidthMm}
+              />
+            </label>
+            <label>
+              ขอบข้าง
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ paddingXMm: Number(event.currentTarget.value) })}
+                type="number"
+                value={settings.paddingXMm}
+              />
+            </label>
+            <label>
+              เลื่อน
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ xOffsetMm: Number(event.currentTarget.value) })}
+                step="0.5"
+                type="number"
+                value={settings.xOffsetMm}
+              />
+            </label>
+            <label>
+              คม
+              <select onChange={(event) => updateSettings({ pixelRatio: Number(event.currentTarget.value) })} value={settings.pixelRatio}>
+                <option value={2}>2x</option>
+                <option value={3}>3x</option>
+                <option value={4}>4x</option>
+                <option value={5}>5x</option>
+              </select>
+            </label>
+          </div>
         </div>
       ) : null}
-      <div className="receipt-paper" ref={receiptRef}>
+      <div
+        className="receipt-paper"
+        ref={receiptRef}
+        style={{
+          width: `${settings.paperWidthMm}mm`,
+          padding: `${settings.paddingTopMm}mm ${settings.paddingXMm}mm ${settings.paddingBottomMm}mm`
+        }}
+      >
         <img alt="" className="receipt-logo" src="/store-logo.png" />
         <div className="receipt-store-name">BLEND HOUSE</div>
         <div className="receipt-order-number">{orderNumber}</div>
@@ -2112,6 +2218,61 @@ function orderItemTotal(item: OrderItem) {
 
 function sanitizeFileName(value: string) {
   return value.replace(/[^a-zA-Z0-9ก-๙_-]+/g, "-").replace(/^-+|-+$/g, "") || "order";
+}
+
+function getStoredReceiptPaperSettings(): ReceiptPaperSettings {
+  try {
+    const raw = localStorage.getItem(receiptPaperStorageKey);
+    if (!raw) return defaultReceiptPaperSettings;
+    return normalizeReceiptPaperSettings({ ...defaultReceiptPaperSettings, ...JSON.parse(raw) });
+  } catch {
+    return defaultReceiptPaperSettings;
+  }
+}
+
+function normalizeReceiptPaperSettings(settings: ReceiptPaperSettings): ReceiptPaperSettings {
+  const presetId = receiptPaperPresets.some((preset) => preset.id === settings.presetId) ? settings.presetId : "a9max77";
+  return {
+    presetId,
+    paperWidthMm: clampNumber(settings.paperWidthMm, 40, 120, defaultReceiptPaperSettings.paperWidthMm),
+    paddingXMm: clampNumber(settings.paddingXMm, 0, 20, defaultReceiptPaperSettings.paddingXMm),
+    paddingTopMm: clampNumber(settings.paddingTopMm, 0, 20, defaultReceiptPaperSettings.paddingTopMm),
+    paddingBottomMm: clampNumber(settings.paddingBottomMm, 0, 30, defaultReceiptPaperSettings.paddingBottomMm),
+    xOffsetMm: clampNumber(settings.xOffsetMm, -20, 20, defaultReceiptPaperSettings.xOffsetMm),
+    pixelRatio: Math.round(clampNumber(settings.pixelRatio, 2, 5, defaultReceiptPaperSettings.pixelRatio))
+  };
+}
+
+function clampNumber(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+async function shiftImageDataUrl(dataUrl: string, xOffsetMm: number, widthPx: number, paperWidthMm: number) {
+  if (!xOffsetMm || !paperWidthMm) return dataUrl;
+
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return dataUrl;
+
+  const cssPxOffset = (xOffsetMm / paperWidthMm) * widthPx;
+  const rasterOffset = cssPxOffset * (image.naturalWidth / widthPx);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, rasterOffset, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Receipt image could not be loaded."));
+    image.src = src;
+  });
 }
 
 function padNumber(value: number) {
