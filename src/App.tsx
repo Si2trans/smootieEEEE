@@ -94,8 +94,8 @@ const defaultReceiptPaperSettings: ReceiptPaperSettings = {
   presetId: "a9max77",
   paperWidthMm: 77,
   paddingXMm: 0,
-  paddingTopMm: 0,
-  paddingBottomMm: 0,
+  paddingTopMm: 5,
+  paddingBottomMm: 7,
   xOffsetMm: 0,
   pixelRatio: 4
 };
@@ -1374,6 +1374,24 @@ function OrderReceipt({
                 onChange={(event) => updateSettings({ paddingXMm: Number(event.currentTarget.value) })}
                 type="number"
                 value={settings.paddingXMm}
+              />
+            </label>
+            <label>
+              ขอบบน
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ paddingTopMm: Number(event.currentTarget.value) })}
+                type="number"
+                value={settings.paddingTopMm}
+              />
+            </label>
+            <label>
+              ขอบล่าง
+              <input
+                inputMode="decimal"
+                onChange={(event) => updateSettings({ paddingBottomMm: Number(event.currentTarget.value) })}
+                type="number"
+                value={settings.paddingBottomMm}
               />
             </label>
             <label>

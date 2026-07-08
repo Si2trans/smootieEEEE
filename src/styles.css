@@ -1588,7 +1588,7 @@ p {
 }
 
 .receipt-preview-toolbar {
-  width: min(100%, 340px);
+  width: min(100%, 360px);
   display: grid;
   gap: 8px;
   position: sticky;
@@ -1619,7 +1619,7 @@ p {
 
 .receipt-paper-controls {
   display: grid;
-  grid-template-columns: 1.35fr repeat(4, minmax(0, 0.8fr));
+  grid-template-columns: 1.35fr repeat(6, minmax(0, 0.8fr));
   gap: 6px;
   padding: 8px;
   border: 1px solid #e3e9df;
@@ -2058,7 +2058,7 @@ p {
 
 @media (max-width: 420px) {
   .receipt-preview-toolbar {
-    width: min(100%, 352px);
+    width: min(100%, 360px);
   }
 
   .receipt-paper-controls {
