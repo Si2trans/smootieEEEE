@@ -136,6 +136,7 @@ export async function saveIngredient(input: SaveIngredientInput) {
     buy_price: buyPrice,
     base_unit: input.baseUnit,
     cost_per_unit: costPerUnit,
+    addon_price: Number(input.addonPrice ?? 0),
     note: input.note || ""
   });
 }
@@ -290,6 +291,7 @@ function normalizeIngredients(rows: Array<Record<string, unknown>>): Ingredient[
     buyPrice: number(row.buy_price || row.buyPrice),
     baseUnit: unit(row.base_unit || row.baseUnit),
     costPerUnit: number(row.cost_per_unit || row.costPerUnit),
+    addonPrice: number(row.addon_price || row.addonPrice, 0),
     note: text(row.note)
   }));
 }

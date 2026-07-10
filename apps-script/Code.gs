@@ -36,17 +36,17 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.ingredients,
-      headers: ["id", "name", "category", "buy_qty", "buy_unit", "buy_price", "base_unit", "cost_per_unit", "note", "updated_at"],
+      headers: ["id", "name", "category", "buy_qty", "buy_unit", "buy_price", "base_unit", "cost_per_unit", "addon_price", "note", "updated_at"],
       rows: [
-        ["ing_tea", "ผงชาไทย", "วัตถุดิบน้ำ", 500, "g", 120, "g", 0.24, "", new Date().toISOString()],
-        ["ing_milk", "นมสด", "วัตถุดิบน้ำ", 2000, "ml", 95, "ml", 0.0475, "", new Date().toISOString()],
-        ["ing_condensed", "นมข้นหวาน", "วัตถุดิบน้ำ", 388, "g", 28, "g", 0.072, "", new Date().toISOString()],
-        ["ing_creamer", "ครีมเทียมข้นจืด", "วัตถุดิบน้ำ", 1000, "ml", 52, "ml", 0.052, "", new Date().toISOString()],
-        ["ing_syrup", "น้ำเชื่อม", "วัตถุดิบน้ำ", 750, "ml", 42, "ml", 0.056, "", new Date().toISOString()],
-        ["ing_boba", "ไข่มุก", "ท็อปปิ้ง", 1000, "g", 80, "g", 0.08, "", new Date().toISOString()],
-        ["ing_cocoa", "ผงโกโก้", "วัตถุดิบน้ำ", 500, "g", 135, "g", 0.27, "", new Date().toISOString()],
-        ["ing_matcha", "มัทฉะ", "วัตถุดิบน้ำ", 100, "g", 230, "g", 2.3, "", new Date().toISOString()],
-        ["ing_cup16", "แก้ว 16 oz + ฝา", "บรรจุภัณฑ์", 100, "piece", 250, "piece", 2.5, "", new Date().toISOString()]
+        ["ing_tea", "ผงชาไทย", "วัตถุดิบน้ำ", 500, "g", 120, "g", 0.24, 0, "", new Date().toISOString()],
+        ["ing_milk", "นมสด", "วัตถุดิบน้ำ", 2000, "ml", 95, "ml", 0.0475, 0, "", new Date().toISOString()],
+        ["ing_condensed", "นมข้นหวาน", "วัตถุดิบน้ำ", 388, "g", 28, "g", 0.072, 0, "", new Date().toISOString()],
+        ["ing_creamer", "ครีมเทียมข้นจืด", "วัตถุดิบน้ำ", 1000, "ml", 52, "ml", 0.052, 0, "", new Date().toISOString()],
+        ["ing_syrup", "น้ำเชื่อม", "วัตถุดิบน้ำ", 750, "ml", 42, "ml", 0.056, 0, "", new Date().toISOString()],
+        ["ing_boba", "ไข่มุก", "ท็อปปิ้ง", 1000, "g", 80, "g", 0.08, 10, "", new Date().toISOString()],
+        ["ing_cocoa", "ผงโกโก้", "วัตถุดิบน้ำ", 500, "g", 135, "g", 0.27, 0, "", new Date().toISOString()],
+        ["ing_matcha", "มัทฉะ", "วัตถุดิบน้ำ", 100, "g", 230, "g", 2.3, 0, "", new Date().toISOString()],
+        ["ing_cup16", "แก้ว 16 oz + ฝา", "บรรจุภัณฑ์", 100, "piece", 250, "piece", 2.5, 0, "", new Date().toISOString()]
       ]
     },
     {

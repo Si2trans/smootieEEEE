@@ -18,6 +18,7 @@ export type Ingredient = {
   buyPrice: number;
   baseUnit: Unit;
   costPerUnit: number;
+  addonPrice?: number;
   note?: string;
 };
 

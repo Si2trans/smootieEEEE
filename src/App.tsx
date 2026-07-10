@@ -63,6 +63,7 @@ type CostMode = "formula" | "price" | "profit";
 type DeliveryPricingMode = "offsetGp" | "markup";
 type OrderAddon = {
   id: string;
+  ingredientId?: string;
   name: string;
   price: number;
 };
@@ -547,6 +548,7 @@ function App() {
         buyPrice,
         baseUnit,
         costPerUnit: buyQty > 0 ? buyPrice / buyQty : 0,
+        addonPrice: Number(form.get("addonPrice") || 0),
         note: String(form.get("note") || "")
       };
       await enqueueMutation({ action: "saveIngredient", entityId: ingredient.id, payload: ingredient });
@@ -790,6 +792,7 @@ function App() {
                 <OrderScreen
                   channel={orderChannel}
                   customerName={orderCustomerName}
+                  ingredients={ingredientList}
                   items={orderItems}
                   note={orderNote}
                   orderNumber={orderNumber}
@@ -1115,6 +1118,7 @@ function RecipesScreen({
 function OrderScreen({
   channel,
   customerName,
+  ingredients,
   items,
   note,
   orderNumber,
@@ -1137,6 +1141,7 @@ function OrderScreen({
 }: {
   channel: string;
   customerName: string;
+  ingredients: Ingredient[];
   items: OrderItem[];
   note: string;
   orderNumber: string;
@@ -1161,7 +1166,20 @@ function OrderScreen({
   const visibleRecipes = recipes
     .filter((recipe) => recipe.name.toLowerCase().includes(normalizedOrderSearch))
     .slice(0, normalizedOrderSearch ? 12 : 3);
+  const toppingIngredients = ingredients.filter((ingredient) => ingredient.category === "ท็อปปิ้ง");
   const channels = ["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"];
+
+  function updateAddonName(itemId: string, addonId: string, value: string) {
+    const normalized = value.trim().toLowerCase();
+    const topping = toppingIngredients.find((ingredient) => ingredient.name.trim().toLowerCase() === normalized);
+    onUpdateAddon(
+      itemId,
+      addonId,
+      topping
+        ? { ingredientId: topping.id, name: topping.name, price: Number(topping.addonPrice || 0) }
+        : { ingredientId: undefined, name: value }
+    );
+  }
 
   return (
     <>
@@ -1203,6 +1221,11 @@ function OrderScreen({
       </section>
 
       <section className="order-cart">
+        <datalist id="order-topping-options">
+          {toppingIngredients.map((ingredient) => (
+            <option key={ingredient.id} value={ingredient.name}>{money(ingredient.addonPrice || 0)} บาท</option>
+          ))}
+        </datalist>
         <div className="order-cart__title">
           <h3>รายการบิล</h3>
           {items.length ? <button onClick={onClear} type="button">ล้าง</button> : null}
@@ -1250,7 +1273,8 @@ function OrderScreen({
               {item.addons.map((addon) => (
                 <div className="order-addon-row" key={addon.id}>
                   <input
-                    onChange={(event) => onUpdateAddon(item.id, addon.id, { name: event.currentTarget.value })}
+                    list="order-topping-options"
+                    onChange={(event) => updateAddonName(item.id, addon.id, event.currentTarget.value)}
                     placeholder="ท็อปปิ้ง"
                     value={addon.name}
                   />
@@ -1878,6 +1902,13 @@ function IngredientForm({
           <FormField defaultValue={ingredient?.buyPrice} label="ราคาซื้อ (บาท)" name="buyPrice" placeholder="0.00" type="number" />
           <UnitSelect defaultValue={ingredient?.baseUnit || ingredient?.buyUnit || "ml"} label="หน่วยคิดต้นทุน" name="baseUnit" />
         </div>
+        <FormField
+          defaultValue={ingredient?.addonPrice || 0}
+          label="ราคาขายท็อปปิ้ง (บาท)"
+          name="addonPrice"
+          placeholder="เช่น 10"
+          type="number"
+        />
         <label>
           หมายเหตุ
           <textarea defaultValue={ingredient?.note || ""} name="note" placeholder="ถ้ามี" />
