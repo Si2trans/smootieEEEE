@@ -15,6 +15,9 @@
 - `Recipes`
 - `RecipeItems`
 - `Favorites`
+- `Sales`
+- `SaleItems`
+- `DailyClosings`
 
 ตัวอย่าง API:
 
@@ -25,6 +28,8 @@ POST /exec?action=saveIngredient
 POST /exec?action=saveRecipe
 POST /exec?action=calculateCost
 POST /exec?action=uploadRecipeImage
+POST /exec?action=saveSale
+POST /exec?action=saveDailyClosing
 ```
 
 ถ้าจะอัปโหลดรูปผ่าน Google Drive ให้สร้างโฟลเดอร์รูป แล้วตั้ง Script Property:

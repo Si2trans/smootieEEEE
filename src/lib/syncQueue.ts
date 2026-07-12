@@ -3,14 +3,18 @@ import {
   deleteRecipe,
   isAccessDeniedError,
   safeRecipeImageUrl,
+  saveDailyClosing,
   saveIngredient,
   saveRecipe,
+  saveSale,
   uploadRecipeImage
 } from "./appsScriptApi";
 import type {
   AppData,
+  SaveDailyClosingInput,
   SaveIngredientInput,
   SaveRecipeInput,
+  SaveSaleInput,
   UploadImageInput
 } from "./appsScriptApi";
 import type { Recipe } from "../types/app";
@@ -34,9 +38,9 @@ type SaveRecipeWithImagePayload = {
 
 export type SyncMutation = {
   id: string;
-  action: "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe";
+  action: "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "saveDailyClosing";
   entityId: string;
-  payload: SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | { id: string };
+  payload: SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | SaveSaleInput | SaveDailyClosingInput | { id: string };
   createdAt: number;
   attempts: number;
   status: "pending" | "syncing" | "failed";
@@ -92,6 +96,8 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
   const queued = await listMutations();
   let ingredients = data.ingredients.map((ingredient) => ({ ...ingredient }));
   let recipes = data.recipes.map((recipe) => ({ ...recipe, items: recipe.items.map((item) => ({ ...item })) }));
+  let sales = (data.sales || []).map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
+  let dailyClosings = (data.dailyClosings || []).map((closing) => ({ ...closing }));
 
   queued.forEach((mutation) => {
     if (mutation.action === "saveIngredient") {
@@ -144,10 +150,26 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
 
     if (mutation.action === "deleteRecipe") {
       recipes = recipes.filter((recipe) => recipe.id !== mutation.entityId);
+      return;
+    }
+
+    if (mutation.action === "saveSale") {
+      const sale = mutation.payload as SaveSaleInput;
+      const nextSale = { ...sale, createdAt: sale.createdAt || new Date().toISOString() };
+      sales = sales.some((item) => item.id === sale.id) ? sales.map((item) => (item.id === sale.id ? nextSale : item)) : [nextSale, ...sales];
+      return;
+    }
+
+    if (mutation.action === "saveDailyClosing") {
+      const closing = mutation.payload as SaveDailyClosingInput;
+      const nextClosing = { ...closing, closedAt: closing.closedAt || new Date().toISOString() };
+      dailyClosings = dailyClosings.some((item) => item.id === closing.id)
+        ? dailyClosings.map((item) => (item.id === closing.id ? nextClosing : item))
+        : [nextClosing, ...dailyClosings];
     }
   });
 
-  return { ...data, ingredients, recipes };
+  return { ...data, ingredients, recipes, sales, dailyClosings };
 }
 
 async function runFlush(): Promise<FlushResult> {
@@ -206,6 +228,14 @@ async function executeMutation(mutation: SyncMutation) {
   }
   if (mutation.action === "deleteRecipe") {
     await deleteRecipe(mutation.entityId);
+    return;
+  }
+  if (mutation.action === "saveSale") {
+    await saveSale(mutation.payload as SaveSaleInput);
+    return;
+  }
+  if (mutation.action === "saveDailyClosing") {
+    await saveDailyClosing(mutation.payload as SaveDailyClosingInput);
     return;
   }
 

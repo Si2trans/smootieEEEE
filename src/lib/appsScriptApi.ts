@@ -1,4 +1,4 @@
-import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "../types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
 
 const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
@@ -16,12 +16,17 @@ type BootstrapResponse = {
   recipes?: Array<Record<string, unknown>>;
   recipeItems?: Array<Record<string, unknown>>;
   favorites?: Array<Record<string, unknown>>;
+  sales?: Array<Record<string, unknown>>;
+  saleItems?: Array<Record<string, unknown>>;
+  dailyClosings?: Array<Record<string, unknown>>;
 };
 
 export type AppData = {
   categories: Category[];
   ingredients: Ingredient[];
   recipes: Recipe[];
+  sales: Sale[];
+  dailyClosings: DailyClosing[];
 };
 
 export type SaveIngredientInput = Omit<Ingredient, "costPerUnit"> & { costPerUnit?: number };
@@ -50,6 +55,9 @@ export type UploadImageInput = {
   base64: string;
   mutationId?: string;
 };
+
+export type SaveSaleInput = Omit<Sale, "createdAt"> & { createdAt?: string };
+export type SaveDailyClosingInput = Omit<DailyClosing, "closedAt"> & { closedAt?: string };
 
 export async function fetchAppData(options: { cache?: boolean } = {}): Promise<AppData> {
   const data = (await postAction("getBootstrapData", {})) as BootstrapResponse;
@@ -109,7 +117,9 @@ export function cacheAppData(data: AppData) {
       recipes: data.recipes.map((recipe) => ({
         ...recipe,
         imageUrl: safeRecipeImageUrl(recipe.imageUrl)
-      }))
+      })),
+      sales: data.sales || [],
+      dailyClosings: data.dailyClosings || []
     };
     window.localStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(cacheable));
   } catch {
@@ -137,7 +147,54 @@ export async function saveIngredient(input: SaveIngredientInput) {
     base_unit: input.baseUnit,
     cost_per_unit: costPerUnit,
     addon_price: Number(input.addonPrice ?? 0),
+    addon_amount: Number(input.addonAmount ?? 0),
+    addon_unit: input.addonUnit || input.baseUnit,
     note: input.note || ""
+  });
+}
+
+export async function saveSale(input: SaveSaleInput) {
+  return postAction("saveSale", {
+    sale: {
+      id: input.id || `sale_${Date.now()}`,
+      sale_date: input.saleDate,
+      channel: input.channel,
+      total_revenue: Number(input.totalRevenue || 0),
+      total_cost: Number(input.totalCost || 0),
+      total_profit: Number(input.totalProfit || 0),
+      note: input.note || "",
+      created_at: input.createdAt || new Date().toISOString()
+    },
+    items: input.items.map((item, index) => ({
+      id: item.id || `sitem_${Date.now()}_${index}`,
+      sale_id: input.id,
+      parent_id: item.parentId || "",
+      item_id: item.itemId,
+      kind: item.kind,
+      name: item.name,
+      qty: Number(item.qty || 0),
+      unit_price: Number(item.unitPrice || 0),
+      unit_cost: Number(item.unitCost || 0),
+      line_revenue: Number(item.lineRevenue || 0),
+      line_cost: Number(item.lineCost || 0),
+      line_profit: Number(item.lineProfit || 0),
+      note: item.note || "",
+      sort_order: index + 1
+    }))
+  });
+}
+
+export async function saveDailyClosing(input: SaveDailyClosingInput) {
+  return postAction("saveDailyClosing", {
+    id: input.id || `close_${Date.now()}`,
+    business_date: input.businessDate,
+    order_count: Number(input.orderCount || 0),
+    item_count: Number(input.itemCount || 0),
+    total_revenue: Number(input.totalRevenue || 0),
+    total_cost: Number(input.totalCost || 0),
+    total_profit: Number(input.totalProfit || 0),
+    note: input.note || "",
+    closed_at: input.closedAt || new Date().toISOString()
   });
 }
 
@@ -265,7 +322,9 @@ function normalizeBootstrapData(data: BootstrapResponse): AppData {
   return {
     categories: [ALL_CATEGORY, ...categories],
     ingredients,
-    recipes
+    recipes,
+    sales: normalizeSales(data.sales || [], data.saleItems || []),
+    dailyClosings: normalizeDailyClosings(data.dailyClosings || [])
   };
 }
 
@@ -292,8 +351,70 @@ function normalizeIngredients(rows: Array<Record<string, unknown>>): Ingredient[
     baseUnit: unit(row.base_unit || row.baseUnit),
     costPerUnit: number(row.cost_per_unit || row.costPerUnit),
     addonPrice: number(row.addon_price || row.addonPrice, 0),
+    addonAmount: number(row.addon_amount || row.addonAmount, 0),
+    addonUnit: unit(row.addon_unit || row.addonUnit || row.base_unit || row.baseUnit),
     note: text(row.note)
   }));
+}
+
+function normalizeSales(saleRows: Array<Record<string, unknown>>, itemRows: Array<Record<string, unknown>>): Sale[] {
+  const itemsBySale = new Map<string, SaleItem[]>();
+  itemRows
+    .slice()
+    .sort((a, b) => number(a.sort_order) - number(b.sort_order))
+    .forEach((row) => {
+      const saleId = text(row.sale_id || row.saleId);
+      if (!saleId) return;
+      const item: SaleItem = {
+        id: text(row.id),
+        saleId,
+        parentId: text(row.parent_id || row.parentId) || undefined,
+        itemId: text(row.item_id || row.itemId),
+        kind: saleItemKind(row.kind),
+        name: text(row.name),
+        qty: number(row.qty, 1),
+        unitPrice: number(row.unit_price || row.unitPrice),
+        unitCost: number(row.unit_cost || row.unitCost),
+        lineRevenue: number(row.line_revenue || row.lineRevenue),
+        lineCost: number(row.line_cost || row.lineCost),
+        lineProfit: number(row.line_profit || row.lineProfit),
+        note: text(row.note)
+      };
+      itemsBySale.set(saleId, [...(itemsBySale.get(saleId) || []), item]);
+    });
+
+  return saleRows
+    .map((row) => {
+      const id = text(row.id);
+      return {
+        id,
+        saleDate: text(row.sale_date || row.saleDate),
+        channel: text(row.channel) || "หน้าร้าน",
+        totalRevenue: number(row.total_revenue || row.totalRevenue),
+        totalCost: number(row.total_cost || row.totalCost),
+        totalProfit: number(row.total_profit || row.totalProfit),
+        note: text(row.note),
+        createdAt: text(row.created_at || row.createdAt),
+        items: itemsBySale.get(id) || []
+      };
+    })
+    .filter((sale) => sale.id && sale.saleDate);
+}
+
+function normalizeDailyClosings(rows: Array<Record<string, unknown>>): DailyClosing[] {
+  return rows
+    .map((row) => ({
+      id: text(row.id),
+      businessDate: text(row.business_date || row.businessDate),
+      orderCount: number(row.order_count || row.orderCount),
+      itemCount: number(row.item_count || row.itemCount),
+      totalRevenue: number(row.total_revenue || row.totalRevenue),
+      totalCost: number(row.total_cost || row.totalCost),
+      totalProfit: number(row.total_profit || row.totalProfit),
+      note: text(row.note),
+      closedAt: text(row.closed_at || row.closedAt)
+    }))
+    .filter((closing) => closing.id && closing.businessDate);
 }
 
 function normalizeRecipes(
@@ -409,6 +530,11 @@ function categoryId(value: unknown): CategoryId {
 function unit(value: unknown): Unit {
   const normalized = text(value) as Unit;
   return ["ml", "g", "piece"].includes(normalized) ? normalized : "ml";
+}
+
+function saleItemKind(value: unknown): SaleItemKind {
+  const normalized = text(value) as SaleItemKind;
+  return ["recipe", "topping", "custom"].includes(normalized) ? normalized : "custom";
 }
 
 function text(value: unknown) {

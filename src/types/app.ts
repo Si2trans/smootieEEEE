@@ -19,6 +19,8 @@ export type Ingredient = {
   baseUnit: Unit;
   costPerUnit: number;
   addonPrice?: number;
+  addonAmount?: number;
+  addonUnit?: Unit;
   note?: string;
 };
 
@@ -54,4 +56,46 @@ export type CostBreakdown = {
   totalCost: number;
   profit: number;
   margin: number;
+};
+
+export type SaleItemKind = "recipe" | "topping" | "custom";
+
+export type SaleItem = {
+  id: string;
+  saleId: string;
+  parentId?: string;
+  itemId: string;
+  kind: SaleItemKind;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  unitCost: number;
+  lineRevenue: number;
+  lineCost: number;
+  lineProfit: number;
+  note?: string;
+};
+
+export type Sale = {
+  id: string;
+  saleDate: string;
+  channel: string;
+  totalRevenue: number;
+  totalCost: number;
+  totalProfit: number;
+  note?: string;
+  createdAt: string;
+  items: SaleItem[];
+};
+
+export type DailyClosing = {
+  id: string;
+  businessDate: string;
+  orderCount: number;
+  itemCount: number;
+  totalRevenue: number;
+  totalCost: number;
+  totalProfit: number;
+  note?: string;
+  closedAt: string;
 };

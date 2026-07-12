@@ -2029,6 +2029,269 @@ p {
   font-weight: 800;
 }
 
+.sales-panel,
+.sales-picker,
+.sales-cart,
+.sales-summary-card,
+.closing-panel {
+  background: #fff;
+  border: 1px solid #edf0ea;
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(31, 54, 22, 0.05);
+}
+
+.sales-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.sales-panel label,
+.sales-item label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sales-panel input,
+.sales-item input {
+  width: 100%;
+  height: 42px;
+  border: 1px solid #e1e6dd;
+  border-radius: 10px;
+  padding: 0 12px;
+  background: #fff;
+  font: inherit;
+}
+
+.sales-picker,
+.sales-cart,
+.closing-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.sales-picker h3,
+.closing-panel h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sales-picker button {
+  min-height: 58px;
+  border: 1px solid #edf0ea;
+  border-radius: 13px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  background: #fff;
+}
+
+.sales-picker span,
+.sales-picker small {
+  display: block;
+}
+
+.sales-picker small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sales-item {
+  border-top: 1px solid #f0f2ee;
+  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.sales-item:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.sales-topping-picker {
+  display: grid;
+  gap: 7px;
+}
+
+.sales-topping-picker > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sales-topping-picker > div {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.sales-topping-picker > div::-webkit-scrollbar {
+  display: none;
+}
+
+.sales-topping-picker button {
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  background: #eef8e9;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sales-item-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.sales-item-breakdown span,
+.sales-item-breakdown strong {
+  min-height: 32px;
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: #f7faf4;
+  color: #56604f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sales-item-breakdown strong {
+  grid-column: 1 / -1;
+  color: var(--green);
+}
+
+.sales-summary-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sales-summary-card div {
+  min-width: 0;
+  border-radius: 10px;
+  background: #f7faf4;
+  padding: 10px;
+}
+
+.sales-summary-card span,
+.closing-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sales-summary-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--green);
+  font-size: 16px;
+}
+
+.sales-summary-card--closing {
+  grid-template-columns: 1fr 1fr;
+}
+
+.sales-summary-card--report {
+  grid-template-columns: 1fr;
+}
+
+.report-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: #f3f6f1;
+}
+
+.report-toggle button {
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #56604f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.report-toggle button.is-active {
+  background: var(--green);
+  color: #fff;
+}
+
+.closing-report {
+  margin-bottom: 8px;
+}
+
+.closing-chart {
+  display: grid;
+  gap: 8px;
+}
+
+.closing-chart__row {
+  display: grid;
+  grid-template-columns: 38px 1fr 72px;
+  gap: 8px;
+  align-items: center;
+  color: #56604f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.closing-chart__row div {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef3eb;
+}
+
+.closing-chart__row i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3f8f18, #78bd45);
+}
+
+.closing-chart__row strong {
+  color: #17210f;
+  text-align: right;
+  font-size: 12px;
+}
+
+.closing-list {
+  display: grid;
+  gap: 6px;
+}
+
+.closing-list h4 {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.closing-list div {
+  min-height: 42px;
+  border-top: 1px solid #f0f2ee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.submit-button--light {
+  background: #eef5ea;
+  color: var(--green);
+}
+
 @page {
   size: 57mm auto;
   margin: 0;

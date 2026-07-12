@@ -4,7 +4,10 @@ const SHEETS = {
   ingredients: "Ingredients",
   recipes: "Recipes",
   recipeItems: "RecipeItems",
-  favorites: "Favorites"
+  favorites: "Favorites",
+  sales: "Sales",
+  saleItems: "SaleItems",
+  dailyClosings: "DailyClosings"
 };
 
 const DEFAULT_CATEGORIES = [
@@ -36,17 +39,17 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.ingredients,
-      headers: ["id", "name", "category", "buy_qty", "buy_unit", "buy_price", "base_unit", "cost_per_unit", "addon_price", "note", "updated_at"],
+      headers: ["id", "name", "category", "buy_qty", "buy_unit", "buy_price", "base_unit", "cost_per_unit", "addon_price", "addon_amount", "addon_unit", "note", "updated_at"],
       rows: [
-        ["ing_tea", "ผงชาไทย", "วัตถุดิบน้ำ", 500, "g", 120, "g", 0.24, 0, "", new Date().toISOString()],
-        ["ing_milk", "นมสด", "วัตถุดิบน้ำ", 2000, "ml", 95, "ml", 0.0475, 0, "", new Date().toISOString()],
-        ["ing_condensed", "นมข้นหวาน", "วัตถุดิบน้ำ", 388, "g", 28, "g", 0.072, 0, "", new Date().toISOString()],
-        ["ing_creamer", "ครีมเทียมข้นจืด", "วัตถุดิบน้ำ", 1000, "ml", 52, "ml", 0.052, 0, "", new Date().toISOString()],
-        ["ing_syrup", "น้ำเชื่อม", "วัตถุดิบน้ำ", 750, "ml", 42, "ml", 0.056, 0, "", new Date().toISOString()],
-        ["ing_boba", "ไข่มุก", "ท็อปปิ้ง", 1000, "g", 80, "g", 0.08, 10, "", new Date().toISOString()],
-        ["ing_cocoa", "ผงโกโก้", "วัตถุดิบน้ำ", 500, "g", 135, "g", 0.27, 0, "", new Date().toISOString()],
-        ["ing_matcha", "มัทฉะ", "วัตถุดิบน้ำ", 100, "g", 230, "g", 2.3, 0, "", new Date().toISOString()],
-        ["ing_cup16", "แก้ว 16 oz + ฝา", "บรรจุภัณฑ์", 100, "piece", 250, "piece", 2.5, 0, "", new Date().toISOString()]
+        ["ing_tea", "ผงชาไทย", "วัตถุดิบน้ำ", 500, "g", 120, "g", 0.24, 0, 0, "g", "", new Date().toISOString()],
+        ["ing_milk", "นมสด", "วัตถุดิบน้ำ", 2000, "ml", 95, "ml", 0.0475, 0, 0, "ml", "", new Date().toISOString()],
+        ["ing_condensed", "นมข้นหวาน", "วัตถุดิบน้ำ", 388, "g", 28, "g", 0.072, 0, 0, "g", "", new Date().toISOString()],
+        ["ing_creamer", "ครีมเทียมข้นจืด", "วัตถุดิบน้ำ", 1000, "ml", 52, "ml", 0.052, 0, 0, "ml", "", new Date().toISOString()],
+        ["ing_syrup", "น้ำเชื่อม", "วัตถุดิบน้ำ", 750, "ml", 42, "ml", 0.056, 0, 0, "ml", "", new Date().toISOString()],
+        ["ing_boba", "ไข่มุก", "ท็อปปิ้ง", 1000, "g", 80, "g", 0.08, 10, 40, "g", "", new Date().toISOString()],
+        ["ing_cocoa", "ผงโกโก้", "วัตถุดิบน้ำ", 500, "g", 135, "g", 0.27, 0, 0, "g", "", new Date().toISOString()],
+        ["ing_matcha", "มัทฉะ", "วัตถุดิบน้ำ", 100, "g", 230, "g", 2.3, 0, 0, "g", "", new Date().toISOString()],
+        ["ing_cup16", "แก้ว 16 oz + ฝา", "บรรจุภัณฑ์", 100, "piece", 250, "piece", 2.5, 0, 0, "piece", "", new Date().toISOString()]
       ]
     },
     {
@@ -158,6 +161,21 @@ function setupSpreadsheet() {
         ["fav_001", "rec_thai_boba", 1],
         ["fav_002", "rec_matcha", 2]
       ]
+    },
+    {
+      name: SHEETS.sales,
+      headers: ["id", "sale_date", "channel", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
+      rows: []
+    },
+    {
+      name: SHEETS.saleItems,
+      headers: ["id", "sale_id", "parent_id", "item_id", "kind", "name", "qty", "unit_price", "unit_cost", "line_revenue", "line_cost", "line_profit", "note", "sort_order"],
+      rows: []
+    },
+    {
+      name: SHEETS.dailyClosings,
+      headers: ["id", "business_date", "order_count", "item_count", "total_revenue", "total_cost", "total_profit", "note", "closed_at", "updated_at"],
+      rows: []
     }
   ];
 
@@ -235,6 +253,8 @@ function doPost(e) {
     if (action === "toggleFavorite") return jsonResponse(toggleFavorite(payload.recipe_id, payload.favorite));
     if (action === "calculateCost") return jsonResponse(calculateCost(payload.recipe_id));
     if (action === "uploadRecipeImage") return jsonResponse(uploadRecipeImage(payload));
+    if (action === "saveSale") return jsonResponse(saveSale(payload));
+    if (action === "saveDailyClosing") return jsonResponse(saveDailyClosing(payload));
     return jsonResponse({ ok: false, error: "Unknown action: " + action }, 404);
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error) }, 500);
@@ -291,7 +311,10 @@ function getBootstrapData() {
     ingredients: readObjects(SHEETS.ingredients),
     recipes: readObjects(SHEETS.recipes),
     recipeItems: readObjects(SHEETS.recipeItems),
-    favorites: readObjects(SHEETS.favorites)
+    favorites: readObjects(SHEETS.favorites),
+    sales: readObjects(SHEETS.sales),
+    saleItems: readObjects(SHEETS.saleItems),
+    dailyClosings: readObjects(SHEETS.dailyClosings)
   };
 }
 
@@ -520,6 +543,73 @@ function setRecipeFavorite(recipeId, favorite) {
       if (updatedIndex >= 0) sheet.getRange(row + 1, updatedIndex + 1).setValue(new Date().toISOString());
     }
   }
+}
+
+function saveSale(payload) {
+  const sale = payload.sale || payload;
+  const items = payload.items || [];
+  if (!sale.id) sale.id = "sale_" + Date.now();
+  sale.id = cleanId(sale.id);
+  sale.sale_date = cleanId(sale.sale_date);
+  sale.channel = cleanId(sale.channel) || "หน้าร้าน";
+  sale.total_revenue = Number(sale.total_revenue || 0);
+  sale.total_cost = Number(sale.total_cost || 0);
+  sale.total_profit = Number(sale.total_profit || 0);
+  sale.note = cleanId(sale.note || "");
+  if (!sale.created_at) sale.created_at = new Date().toISOString();
+  sale.updated_at = new Date().toISOString();
+
+  dedupeObjectsById(SHEETS.sales, sale.id);
+  deleteSaleItems(sale.id);
+  const saved = saveObject(SHEETS.sales, sale);
+  items.forEach((item, index) => {
+    item.id = cleanId(item.id) || "sitem_" + Date.now() + "_" + index;
+    item.sale_id = sale.id;
+    item.parent_id = cleanId(item.parent_id || "");
+    item.item_id = cleanId(item.item_id);
+    item.kind = cleanId(item.kind) || "custom";
+    item.name = cleanId(item.name);
+    item.qty = Number(item.qty || 0);
+    item.unit_price = Number(item.unit_price || 0);
+    item.unit_cost = Number(item.unit_cost || 0);
+    item.line_revenue = Number(item.line_revenue || 0);
+    item.line_cost = Number(item.line_cost || 0);
+    item.line_profit = Number(item.line_profit || 0);
+    item.note = cleanId(item.note || "");
+    item.sort_order = index + 1;
+    saveObject(SHEETS.saleItems, item);
+  });
+  return { ok: true, sale: saved.item || sale, item_count: items.length };
+}
+
+function deleteSaleItems(saleId) {
+  saleId = cleanId(saleId);
+  const sheet = getSheet(SHEETS.saleItems);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0] || [];
+  const saleIndex = headers.indexOf("sale_id");
+  if (saleIndex < 0) return;
+  for (let row = values.length - 1; row >= 1; row--) {
+    if (cleanId(values[row][saleIndex]) === saleId) sheet.deleteRow(row + 1);
+  }
+}
+
+function saveDailyClosing(payload) {
+  const closing = payload || {};
+  if (!closing.id) closing.id = "close_" + Date.now();
+  closing.id = cleanId(closing.id);
+  closing.business_date = cleanId(closing.business_date);
+  closing.order_count = Number(closing.order_count || 0);
+  closing.item_count = Number(closing.item_count || 0);
+  closing.total_revenue = Number(closing.total_revenue || 0);
+  closing.total_cost = Number(closing.total_cost || 0);
+  closing.total_profit = Number(closing.total_profit || 0);
+  closing.note = cleanId(closing.note || "");
+  if (!closing.closed_at) closing.closed_at = new Date().toISOString();
+  closing.updated_at = new Date().toISOString();
+  dedupeObjectsById(SHEETS.dailyClosings, closing.id);
+  const saved = saveObject(SHEETS.dailyClosings, closing);
+  return { ok: true, closing: saved.item || closing };
 }
 
 function calculateCost(recipeId) {

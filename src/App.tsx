@@ -18,7 +18,6 @@ import {
   RefreshCw,
   Search,
   Settings2,
-  ShoppingBag,
   SlidersHorizontal,
   Sparkles,
   Store,
@@ -53,9 +52,9 @@ import {
 } from "./lib/syncQueue";
 import type { SyncState } from "./lib/syncQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
-import type { Category, CategoryId, Ingredient, Recipe, RecipeItem, Unit } from "./types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
-type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders";
+type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
 type IngredientFilter = "all" | "base" | "topping";
 type SortMode = "latest" | "name" | "cost";
@@ -76,6 +75,26 @@ type OrderItem = {
   note: string;
   addons: OrderAddon[];
 };
+type SaleDraftItem = {
+  id: string;
+  parentId?: string;
+  itemId: string;
+  kind: SaleItemKind;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  unitCost: number;
+  note: string;
+};
+type SalesSummary = {
+  date: string;
+  orderCount: number;
+  itemCount: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+};
+type ClosingReportMode = "week" | "month";
 type ReceiptPaperPresetId = "a9max77" | "a956" | "receipt57" | "custom";
 type ReceiptPaperSettings = {
   presetId: ReceiptPaperPresetId;
@@ -137,6 +156,13 @@ function App() {
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
+  const [sales, setSales] = useState<Sale[]>(cachedData?.sales || []);
+  const [dailyClosings, setDailyClosings] = useState<DailyClosing[]>(cachedData?.dailyClosings || []);
+  const [saleChannel, setSaleChannel] = useState("หน้าร้าน");
+  const [saleDate, setSaleDate] = useState(() => todayKey());
+  const [saleSearch, setSaleSearch] = useState("");
+  const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([]);
+  const [saleNote, setSaleNote] = useState("");
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   const [generatingReceiptPdf, setGeneratingReceiptPdf] = useState(false);
   const [generatingReceiptImage, setGeneratingReceiptImage] = useState(false);
@@ -228,11 +254,14 @@ function App() {
 
   const selectedCost = selectedRecipe ? calculateCost(selectedRecipe, ingredientList) : null;
   const orderTotal = orderItems.reduce((sum, item) => sum + orderItemTotal(item), 0);
+  const saleTotals = calculateSaleDraftTotals(saleItems);
 
-  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[] }, selectedId?: string) {
+  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[] }, selectedId?: string) {
     setCategoryList(data.categories);
     setIngredientList(data.ingredients);
     setRecipes(data.recipes);
+    setSales(data.sales || []);
+    setDailyClosings(data.dailyClosings || []);
     setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current?.id)) || data.recipes[0] || null);
   }
 
@@ -330,7 +359,7 @@ function App() {
       const next = current.some((item) => item.id === recipe.id)
         ? current.map((item) => (item.id === recipe.id ? recipe : item))
         : [recipe, ...current];
-      cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: next });
+      cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: next, sales, dailyClosings });
       return next;
     });
     setSelectedRecipe(recipe);
@@ -341,14 +370,14 @@ function App() {
       ? ingredientList.map((item) => (item.id === ingredient.id ? ingredient : item))
       : [ingredient, ...ingredientList];
     setIngredientList(nextIngredients);
-    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes });
+    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes, sales, dailyClosings });
   }
 
   function removeRecipeLocally(recipeId: string) {
     const nextRecipes = recipes.filter((recipe) => recipe.id !== recipeId);
     setRecipes(nextRecipes);
     setSelectedRecipe((current) => (current?.id === recipeId ? nextRecipes[0] || null : current));
-    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: nextRecipes });
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: nextRecipes, sales, dailyClosings });
   }
 
   function removeIngredientLocally(ingredientId: string) {
@@ -367,7 +396,7 @@ function App() {
           }
         : null
     );
-    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes: nextRecipes });
+    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes: nextRecipes, sales, dailyClosings });
   }
 
   function openRecipe(recipe: Recipe) {
@@ -457,6 +486,156 @@ function App() {
         item.id === itemId ? { ...item, addons: item.addons.filter((addon) => addon.id !== addonId) } : item
       )
     );
+  }
+
+  function addSaleRecipe(recipe: Recipe) {
+    const cost = calculateCost(recipe, ingredientList).totalCost;
+    const unitPrice = orderUnitPrice(recipe, saleChannel);
+    setSaleItems((current) => [
+      ...current,
+      {
+        id: `sale_draft_${Date.now()}_${recipe.id}`,
+        itemId: recipe.id,
+        kind: "recipe",
+        name: recipe.name,
+        qty: 1,
+        unitPrice,
+        unitCost: cost,
+        note: ""
+      }
+    ]);
+  }
+
+  function addSaleTopping(parentId: string, ingredient: Ingredient) {
+    const unitPrice = Number(ingredient.addonPrice || 0);
+    const unitCost = Number(ingredient.costPerUnit || 0) * Number(ingredient.addonAmount || 0);
+    setSaleItems((current) => [
+      ...current,
+      {
+        id: `sale_draft_${Date.now()}_${ingredient.id}`,
+        parentId,
+        itemId: ingredient.id,
+        kind: "topping",
+        name: ingredient.name,
+        qty: 1,
+        unitPrice,
+        unitCost,
+        note: ""
+      }
+    ]);
+  }
+
+  function updateSaleItem(itemId: string, patch: Partial<SaleDraftItem>) {
+    setSaleItems((current) =>
+      current.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              ...patch,
+              qty: Math.max(1, patch.qty ?? item.qty),
+              unitPrice: Math.max(0, patch.unitPrice ?? item.unitPrice),
+              unitCost: Math.max(0, patch.unitCost ?? item.unitCost)
+            }
+          : item
+      )
+    );
+  }
+
+  function removeSaleItem(itemId: string) {
+    setSaleItems((current) => current.filter((item) => item.id !== itemId && item.parentId !== itemId));
+  }
+
+  function applySaleLocally(sale: Sale) {
+    const nextSales = sales.some((item) => item.id === sale.id) ? sales.map((item) => (item.id === sale.id ? sale : item)) : [sale, ...sales];
+    setSales(nextSales);
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales: nextSales, dailyClosings });
+  }
+
+  function applyDailyClosingLocally(closing: DailyClosing) {
+    const nextClosings = dailyClosings.some((item) => item.id === closing.id)
+      ? dailyClosings.map((item) => (item.id === closing.id ? closing : item))
+      : [closing, ...dailyClosings];
+    setDailyClosings(nextClosings);
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales, dailyClosings: nextClosings });
+  }
+
+  async function submitSale() {
+    if (!saleItems.length) {
+      setMessage("เพิ่มรายการขายก่อนบันทึก");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      const saleId = `sale_${Date.now()}`;
+      const items: SaleItem[] = saleItems.map((item, index) => {
+        const multiplier = saleItemMultiplier(item, saleItems);
+        const lineRevenue = multiplier * item.unitPrice;
+        const lineCost = multiplier * item.unitCost;
+        return {
+          id: `sitem_${Date.now()}_${index}`,
+          saleId,
+          parentId: item.parentId,
+          itemId: item.itemId,
+          kind: item.kind,
+          name: item.name,
+          qty: item.qty,
+          unitPrice: item.unitPrice,
+          unitCost: item.unitCost,
+          lineRevenue,
+          lineCost,
+          lineProfit: lineRevenue - lineCost,
+          note: item.note
+        };
+      });
+      const sale: Sale = {
+        id: saleId,
+        saleDate: saleDate || todayKey(),
+        channel: saleChannel,
+        totalRevenue: saleTotals.revenue,
+        totalCost: saleTotals.cost,
+        totalProfit: saleTotals.profit,
+        note: saleNote,
+        createdAt: new Date().toISOString(),
+        items
+      };
+      await enqueueMutation({ action: "saveSale", entityId: sale.id, payload: sale });
+      applySaleLocally(sale);
+      setSaleItems([]);
+      setSaleNote("");
+      setMessage("บันทึกยอดขายแล้ว");
+      void syncPendingInBackground();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกยอดขายไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function closeSalesDay(summary: SalesSummary) {
+    setSaving(true);
+    setMessage("");
+    try {
+      const closing: DailyClosing = {
+        id: `close_${summary.date}_${Date.now()}`,
+        businessDate: summary.date,
+        orderCount: summary.orderCount,
+        itemCount: summary.itemCount,
+        totalRevenue: summary.revenue,
+        totalCost: summary.cost,
+        totalProfit: summary.profit,
+        note: "",
+        closedAt: new Date().toISOString()
+      };
+      await enqueueMutation({ action: "saveDailyClosing", entityId: closing.id, payload: closing });
+      applyDailyClosingLocally(closing);
+      setMessage("บันทึกปิดร้านแล้ว");
+      void syncPendingInBackground();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกปิดร้านไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function printOrderReceipt() {
@@ -549,6 +728,8 @@ function App() {
         baseUnit,
         costPerUnit: buyQty > 0 ? buyPrice / buyQty : 0,
         addonPrice: Number(form.get("addonPrice") || 0),
+        addonAmount: Number(form.get("addonAmount") || 0),
+        addonUnit: String(form.get("addonUnit") || baseUnit) as Unit,
         note: String(form.get("note") || "")
       };
       await enqueueMutation({ action: "saveIngredient", entityId: ingredient.id, payload: ingredient });
@@ -812,6 +993,32 @@ function App() {
                   onSearch={setOrderSearch}
                   onUpdateAddon={updateOrderAddon}
                   onUpdateItem={updateOrderItem}
+                />
+              ) : tab === "sales" ? (
+                <SalesScreen
+                  channels={["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"]}
+                  channel={saleChannel}
+                  closings={dailyClosings}
+                  date={saleDate}
+                  ingredients={ingredientList}
+                  items={saleItems}
+                  note={saleNote}
+                  recipes={recipes}
+                  sales={sales}
+                  saving={saving}
+                  searchQuery={saleSearch}
+                  totals={saleTotals}
+                  onAddRecipe={addSaleRecipe}
+                  onAddTopping={addSaleTopping}
+                  onChannel={setSaleChannel}
+                  onClear={() => setSaleItems([])}
+                  onCloseDay={closeSalesDay}
+                  onDate={setSaleDate}
+                  onNote={setSaleNote}
+                  onRemoveItem={removeSaleItem}
+                  onSearch={setSaleSearch}
+                  onSubmit={submitSale}
+                  onUpdateItem={updateSaleItem}
                 />
               ) : tab === "cost" && selectedRecipe && selectedCost ? (
                 <CostScreen
@@ -1318,6 +1525,308 @@ function OrderScreen({
       </section>
       <button className="submit-button" onClick={onPrint} type="button">สร้างบิล</button>
     </>
+  );
+}
+
+function SalesScreen({
+  channels,
+  channel,
+  closings,
+  date,
+  ingredients,
+  items,
+  note,
+  recipes,
+  sales,
+  saving,
+  searchQuery,
+  totals,
+  onAddRecipe,
+  onAddTopping,
+  onChannel,
+  onClear,
+  onCloseDay,
+  onDate,
+  onNote,
+  onRemoveItem,
+  onSearch,
+  onSubmit,
+  onUpdateItem
+}: {
+  channels: string[];
+  channel: string;
+  closings: DailyClosing[];
+  date: string;
+  ingredients: Ingredient[];
+  items: SaleDraftItem[];
+  note: string;
+  recipes: Recipe[];
+  sales: Sale[];
+  saving: boolean;
+  searchQuery: string;
+  totals: ReturnType<typeof calculateSaleDraftTotals>;
+  onAddRecipe: (recipe: Recipe) => void;
+  onAddTopping: (parentId: string, ingredient: Ingredient) => void;
+  onChannel: (channel: string) => void;
+  onClear: () => void;
+  onCloseDay: (summary: SalesSummary) => void;
+  onDate: (date: string) => void;
+  onNote: (note: string) => void;
+  onRemoveItem: (itemId: string) => void;
+  onSearch: (query: string) => void;
+  onSubmit: () => void;
+  onUpdateItem: (itemId: string, patch: Partial<SaleDraftItem>) => void;
+}) {
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const toppings = ingredients.filter((ingredient) => ingredient.category === "ท็อปปิ้ง" && Number(ingredient.addonPrice || 0) > 0);
+  const visibleRecipes = recipes
+    .filter((recipe) => recipe.name.toLowerCase().includes(normalizedSearch))
+    .slice(0, normalizedSearch ? 10 : 3);
+  const summary = summarizeSales(sales, date);
+  const existingClosing = closings.find((closing) => closing.businessDate === date);
+  const parentItems = items.filter((item) => item.kind !== "topping");
+  const childItems = items.filter((item) => item.kind === "topping");
+
+  return (
+    <>
+      <TopTitle title="บันทึกขาย" />
+      <section className="sales-panel">
+        <label>
+          วันที่ขาย
+          <input onChange={(event) => onDate(event.currentTarget.value)} type="date" value={date} />
+        </label>
+        <div className="order-channel-row">
+          {channels.map((item) => (
+            <button className={channel === item ? "is-active" : ""} key={item} onClick={() => onChannel(item)} type="button">
+              {item}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <label className="search-box search-box--screen">
+        <Search size={18} />
+        <input onChange={(event) => onSearch(event.currentTarget.value)} placeholder="ค้นหาเมนูเพื่อบันทึกขาย..." value={searchQuery} />
+      </label>
+
+      <section className="sales-picker">
+        <h3>เพิ่มเมนูขาย</h3>
+        {visibleRecipes.map((recipe) => (
+          <button key={`recipe-${recipe.id}`} onClick={() => onAddRecipe(recipe)} type="button">
+            <span>
+              <strong>{recipe.name}</strong>
+              <small>{money(orderUnitPrice(recipe, channel))} บาท</small>
+            </span>
+            <Plus size={18} />
+          </button>
+        ))}
+        {!visibleRecipes.length ? <p className="empty-text">ไม่พบเมนูที่ค้นหา</p> : null}
+      </section>
+
+      <section className="sales-cart">
+        <div className="order-cart__title">
+          <h3>รายการที่จะบันทึก</h3>
+          {items.length ? <button onClick={onClear} type="button">ล้าง</button> : null}
+        </div>
+        {parentItems.map((item) => {
+          const addons = childItems.filter((child) => child.parentId === item.id);
+          const itemTotals = calculateSaleDraftTotals([item, ...addons]);
+          return (
+          <div className="sales-item" key={item.id}>
+            <div className="order-item__header">
+              <strong>{item.name}</strong>
+              <button onClick={() => onRemoveItem(item.id)} type="button">
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="order-item__grid">
+              <label>
+                จำนวน
+                <div className="qty-stepper">
+                  <button disabled={item.qty <= 1} onClick={() => onUpdateItem(item.id, { qty: item.qty - 1 })} type="button">-</button>
+                  <strong>{item.qty}</strong>
+                  <button onClick={() => onUpdateItem(item.id, { qty: item.qty + 1 })} type="button">+</button>
+                </div>
+              </label>
+              <label>
+                ราคาขาย
+                <input min="0" onChange={(event) => onUpdateItem(item.id, { unitPrice: Number(event.currentTarget.value || 0) })} type="number" value={item.unitPrice} />
+              </label>
+              <div>
+                <span>กำไร</span>
+                <strong>{money(itemTotals.profit)} บาท</strong>
+              </div>
+            </div>
+            <div className="order-addon-section">
+              {addons.map((addon) => (
+                <div className="order-addon-row" key={addon.id}>
+                  <input readOnly value={addon.name} />
+                  <input
+                    min="0"
+                    onChange={(event) => onUpdateItem(addon.id, { unitPrice: Number(event.currentTarget.value || 0) })}
+                    placeholder="ราคา"
+                    type="number"
+                    value={addon.unitPrice}
+                  />
+                  <button onClick={() => onRemoveItem(addon.id)} type="button">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              {toppings.length ? (
+                <div className="sales-topping-picker">
+                  <span>เพิ่มท็อปปิ้ง</span>
+                  <div>
+                    {toppings.map((ingredient) => (
+                      <button key={ingredient.id} onClick={() => onAddTopping(item.id, ingredient)} type="button">
+                        <Plus size={13} /> {ingredient.name} +{money(ingredient.addonPrice || 0)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="sales-item-breakdown">
+              <span>น้ำ: {money(item.qty * item.unitCost)}</span>
+              <span>ท็อปปิ้ง: {money(item.qty * addons.reduce((sum, addon) => sum + addon.unitCost, 0))}</span>
+              <strong>รวมต้นทุน: {money(itemTotals.cost)}</strong>
+            </div>
+          </div>
+          );
+        })}
+        {!parentItems.length ? <p className="empty-text">แตะ + เพื่อเพิ่มเมนูที่ขายได้</p> : null}
+      </section>
+
+      <label className="order-note">
+        หมายเหตุยอดขาย
+        <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ยอดจากสมุด หรือขายนอกรอบ" value={note} />
+      </label>
+
+      <section className="sales-summary-card">
+        <div>
+          <span>ยอดขาย</span>
+          <strong>{money(totals.revenue)} บาท</strong>
+        </div>
+        <div>
+          <span>ต้นทุนน้ำ</span>
+          <strong>{money(totals.recipeCost)} บาท</strong>
+        </div>
+        <div>
+          <span>ต้นทุนท็อปปิ้ง</span>
+          <strong>{money(totals.toppingCost)} บาท</strong>
+        </div>
+        <div>
+          <span>กำไรรวม</span>
+          <strong>{money(totals.profit)} บาท</strong>
+        </div>
+      </section>
+      <button className="submit-button" disabled={saving || !parentItems.length} onClick={onSubmit} type="button">บันทึกยอดขาย</button>
+
+      <section className="closing-panel">
+        <div className="detail-section__title">
+          <h3>สรุปปิดร้าน</h3>
+          <span>{date}</span>
+        </div>
+        <div className="sales-summary-card sales-summary-card--closing">
+          <div>
+            <span>ยอดขายรวม</span>
+            <strong>{money(summary.revenue)} บาท</strong>
+          </div>
+          <div>
+            <span>ต้นทุนรวม</span>
+            <strong>{money(summary.cost)} บาท</strong>
+          </div>
+          <div>
+            <span>กำไรรวม</span>
+            <strong>{money(summary.profit)} บาท</strong>
+          </div>
+          <div>
+            <span>ออเดอร์</span>
+            <strong>{summary.orderCount}</strong>
+          </div>
+        </div>
+        <div className="closing-list">
+          {summarizeItems(sales, date).map((item) => (
+            <div key={`${item.kind}-${item.name}`}>
+              <span>{item.name}</span>
+              <strong>{item.qty} รายการ · {money(item.revenue)} บาท</strong>
+            </div>
+          ))}
+          {!summary.itemCount ? <p className="empty-text">วันนี้ยังไม่มียอดขายที่บันทึก</p> : null}
+        </div>
+        {existingClosing ? <p className="status-banner">วันนี้เคยบันทึกปิดร้านแล้วเมื่อ {formatReceiptDate(new Date(existingClosing.closedAt))}</p> : null}
+        <button className="submit-button submit-button--light" disabled={saving || summary.orderCount === 0} onClick={() => onCloseDay(summary)} type="button">
+          บันทึกปิดร้าน
+        </button>
+      </section>
+      <ClosingReport closings={closings} referenceDate={date} />
+    </>
+  );
+}
+
+function ClosingReport({ closings, referenceDate }: { closings: DailyClosing[]; referenceDate: string }) {
+  const [mode, setMode] = useState<ClosingReportMode>("week");
+  const reportRows = getClosingReportRows(closings, referenceDate, mode);
+  const totals = reportRows.reduce(
+    (sum, closing) => ({
+      revenue: sum.revenue + closing.totalRevenue,
+      cost: sum.cost + closing.totalCost,
+      profit: sum.profit + closing.totalProfit
+    }),
+    { revenue: 0, cost: 0, profit: 0 }
+  );
+  const maxRevenue = Math.max(1, ...reportRows.map((closing) => closing.totalRevenue));
+  const history = closings
+    .slice()
+    .sort((a, b) => b.businessDate.localeCompare(a.businessDate))
+    .slice(0, 6);
+
+  return (
+    <section className="closing-panel closing-report">
+      <div className="detail-section__title">
+        <h3>รายงานปิดร้าน</h3>
+        <div className="report-toggle">
+          <button className={mode === "week" ? "is-active" : ""} onClick={() => setMode("week")} type="button">7 วัน</button>
+          <button className={mode === "month" ? "is-active" : ""} onClick={() => setMode("month")} type="button">เดือนนี้</button>
+        </div>
+      </div>
+      <div className="sales-summary-card sales-summary-card--report">
+        <div>
+          <span>ยอดขายรวม</span>
+          <strong>{money(totals.revenue)} บาท</strong>
+        </div>
+        <div>
+          <span>ต้นทุนรวม</span>
+          <strong>{money(totals.cost)} บาท</strong>
+        </div>
+        <div>
+          <span>กำไรรวม</span>
+          <strong>{money(totals.profit)} บาท</strong>
+        </div>
+      </div>
+      <div className="closing-chart">
+        {reportRows.map((closing) => (
+          <div className="closing-chart__row" key={closing.businessDate}>
+            <span>{shortDateLabel(closing.businessDate)}</span>
+            <div>
+              <i style={{ width: `${Math.max(6, (closing.totalRevenue / maxRevenue) * 100)}%` }} />
+            </div>
+            <strong>{money(closing.totalRevenue)}</strong>
+          </div>
+        ))}
+        {!reportRows.length ? <p className="empty-text">ยังไม่มีข้อมูลปิดร้านในช่วงนี้</p> : null}
+      </div>
+      <div className="closing-list">
+        <h4>ประวัติล่าสุด</h4>
+        {history.map((closing) => (
+          <div key={closing.id}>
+            <span>{formatThaiDate(closing.businessDate)}</span>
+            <strong>ยอด {money(closing.totalRevenue)} · กำไร {money(closing.totalProfit)}</strong>
+          </div>
+        ))}
+        {!history.length ? <p className="empty-text">ยังไม่มีประวัติปิดร้าน</p> : null}
+      </div>
+    </section>
   );
 }
 
@@ -1909,6 +2418,16 @@ function IngredientForm({
           placeholder="เช่น 10"
           type="number"
         />
+        <div className="form-split">
+          <FormField
+            defaultValue={ingredient?.addonAmount || 0}
+            label="ใช้ต่อครั้ง"
+            name="addonAmount"
+            placeholder="เช่น 40"
+            type="number"
+          />
+          <UnitSelect defaultValue={ingredient?.addonUnit || ingredient?.baseUnit || "g"} label="หน่วยท็อปปิ้ง" name="addonUnit" />
+        </div>
         <label>
           หมายเหตุ
           <textarea defaultValue={ingredient?.note || ""} name="note" placeholder="ถ้ามี" />
@@ -2205,7 +2724,7 @@ function BottomNav({ active, onChange, onAdd }: { active: Tab; onChange: (tab: T
     { id: "home", label: "หน้าแรก", icon: Home },
     { id: "recipes", label: "สูตร", icon: Grid2X2 },
     { id: "orders", label: "ออเดอร์", icon: ClipboardList },
-    { id: "cost", label: "ต้นทุน", icon: ShoppingBag },
+    { id: "sales", label: "ขาย", icon: Store },
     { id: "ingredients", label: "วัตถุดิบ", icon: WalletCards }
   ];
   return (
@@ -2310,6 +2829,108 @@ function orderItemTotal(item: OrderItem) {
 function orderUnitPrice(recipe: Recipe, channel: string) {
   if (channel === "หน้าร้าน") return Number(recipe.sellingPrice || 0);
   return Number(recipe.deliveryPrice || recipe.sellingPrice || 0);
+}
+
+function saleItemMultiplier(item: SaleDraftItem, allItems: SaleDraftItem[]) {
+  if (!item.parentId) return item.qty;
+  const parent = allItems.find((candidate) => candidate.id === item.parentId);
+  return parent?.qty || 1;
+}
+
+function calculateSaleDraftTotals(items: SaleDraftItem[]) {
+  return items.reduce(
+    (totals, item) => {
+      const multiplier = saleItemMultiplier(item, items);
+      const revenue = multiplier * item.unitPrice;
+      const cost = multiplier * item.unitCost;
+      const recipeCost = item.kind === "topping" ? 0 : cost;
+      const toppingCost = item.kind === "topping" ? cost : 0;
+      return {
+        revenue: totals.revenue + revenue,
+        cost: totals.cost + cost,
+        recipeCost: totals.recipeCost + recipeCost,
+        toppingCost: totals.toppingCost + toppingCost,
+        profit: totals.profit + revenue - cost,
+        qty: totals.qty + (item.parentId ? 0 : item.qty)
+      };
+    },
+    { revenue: 0, cost: 0, recipeCost: 0, toppingCost: 0, profit: 0, qty: 0 }
+  );
+}
+
+function todayKey() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function getClosingReportRows(closings: DailyClosing[], referenceDate: string, mode: ClosingReportMode) {
+  const reference = parseDateKey(referenceDate) || new Date();
+  const start = new Date(reference);
+  if (mode === "week") start.setDate(reference.getDate() - 6);
+  else start.setDate(1);
+  const startKey = dateToKey(start);
+  const endKey = dateToKey(reference);
+  return closings
+    .filter((closing) => closing.businessDate >= startKey && closing.businessDate <= endKey)
+    .sort((a, b) => a.businessDate.localeCompare(b.businessDate));
+}
+
+function parseDateKey(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function dateToKey(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function shortDateLabel(value: string) {
+  const date = parseDateKey(value);
+  if (!date) return value;
+  return `${date.getDate()}/${date.getMonth() + 1}`;
+}
+
+function formatThaiDate(value: string) {
+  const date = parseDateKey(value);
+  if (!date) return value;
+  return date.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function summarizeSales(sales: Sale[], date: string): SalesSummary {
+  return sales
+    .filter((sale) => sale.saleDate === date)
+    .reduce(
+      (summary, sale) => ({
+        date,
+        orderCount: summary.orderCount + 1,
+        itemCount: summary.itemCount + sale.items.reduce((sum, item) => sum + item.qty, 0),
+        revenue: summary.revenue + sale.totalRevenue,
+        cost: summary.cost + sale.totalCost,
+        profit: summary.profit + sale.totalProfit
+      }),
+      { date, orderCount: 0, itemCount: 0, revenue: 0, cost: 0, profit: 0 }
+    );
+}
+
+function summarizeItems(sales: Sale[], date: string) {
+  const byKey = new Map<string, { name: string; kind: SaleItemKind; qty: number; revenue: number; profit: number }>();
+  sales
+    .filter((sale) => sale.saleDate === date)
+    .flatMap((sale) => sale.items)
+    .forEach((item) => {
+      const key = `${item.kind}:${item.name}`;
+      const current = byKey.get(key) || { name: item.name, kind: item.kind, qty: 0, revenue: 0, profit: 0 };
+      current.qty += item.qty;
+      current.revenue += item.lineRevenue;
+      current.profit += item.lineProfit;
+      byKey.set(key, current);
+    });
+  return Array.from(byKey.values()).sort((a, b) => b.revenue - a.revenue);
 }
 
 function sanitizeFileName(value: string) {
