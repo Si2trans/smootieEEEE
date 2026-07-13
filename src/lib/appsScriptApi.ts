@@ -103,7 +103,7 @@ export function getCachedAppData(): AppData | null {
     if (!raw) return null;
     const data = JSON.parse(raw) as AppData;
     if (!Array.isArray(data.categories) || !Array.isArray(data.ingredients) || !Array.isArray(data.recipes)) return null;
-    return data;
+    return normalizeAppDataDates(data);
   } catch {
     return null;
   }
@@ -118,8 +118,8 @@ export function cacheAppData(data: AppData) {
         ...recipe,
         imageUrl: safeRecipeImageUrl(recipe.imageUrl)
       })),
-      sales: data.sales || [],
-      dailyClosings: data.dailyClosings || []
+      sales: (data.sales || []).map((sale) => ({ ...sale, saleDate: businessDateKey(sale.saleDate) })),
+      dailyClosings: (data.dailyClosings || []).map((closing) => ({ ...closing, businessDate: businessDateKey(closing.businessDate) }))
     };
     window.localStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(cacheable));
   } catch {
@@ -388,7 +388,7 @@ function normalizeSales(saleRows: Array<Record<string, unknown>>, itemRows: Arra
       const id = text(row.id);
       return {
         id,
-        saleDate: text(row.sale_date || row.saleDate),
+        saleDate: businessDateKey(row.sale_date || row.saleDate),
         channel: text(row.channel) || "หน้าร้าน",
         totalRevenue: number(row.total_revenue || row.totalRevenue),
         totalCost: number(row.total_cost || row.totalCost),
@@ -405,7 +405,7 @@ function normalizeDailyClosings(rows: Array<Record<string, unknown>>): DailyClos
   return rows
     .map((row) => ({
       id: text(row.id),
-      businessDate: text(row.business_date || row.businessDate),
+      businessDate: businessDateKey(row.business_date || row.businessDate),
       orderCount: number(row.order_count || row.orderCount),
       itemCount: number(row.item_count || row.itemCount),
       totalRevenue: number(row.total_revenue || row.totalRevenue),
@@ -535,6 +535,32 @@ function unit(value: unknown): Unit {
 function saleItemKind(value: unknown): SaleItemKind {
   const normalized = text(value) as SaleItemKind;
   return ["recipe", "topping", "custom"].includes(normalized) ? normalized : "custom";
+}
+
+function normalizeAppDataDates(data: AppData): AppData {
+  return {
+    ...data,
+    sales: (data.sales || []).map((sale) => ({ ...sale, saleDate: businessDateKey(sale.saleDate) })),
+    dailyClosings: (data.dailyClosings || []).map((closing) => ({ ...closing, businessDate: businessDateKey(closing.businessDate) }))
+  };
+}
+
+function businessDateKey(value: unknown) {
+  const raw = text(value);
+  if (!raw || /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(parsed);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : raw;
 }
 
 function text(value: unknown) {

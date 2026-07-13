@@ -2033,7 +2033,8 @@ p {
 .sales-picker,
 .sales-cart,
 .sales-summary-card,
-.closing-panel {
+.closing-panel,
+.sales-history-panel {
   background: #fff;
   border: 1px solid #edf0ea;
   border-radius: 14px;
@@ -2068,7 +2069,8 @@ p {
 
 .sales-picker,
 .sales-cart,
-.closing-panel {
+.closing-panel,
+.sales-history-panel {
   display: grid;
   gap: 10px;
 }
@@ -2205,7 +2207,7 @@ p {
 }
 
 .sales-summary-card--report {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .report-toggle {
@@ -2233,39 +2235,287 @@ p {
   margin-bottom: 8px;
 }
 
-.closing-chart {
+.closing-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sales-history-panel h3,
+.seven-day-history h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.sales-history-panel .detail-section__title > div:first-child {
   display: grid;
+  gap: 2px;
+}
+
+.sales-history-panel .detail-section__title small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sales-history-panel .detail-section__title > strong {
+  color: var(--green);
+  font-size: 13px;
+}
+
+.sales-history-list,
+.seven-day-history,
+.day-history-entry__body {
+  display: grid;
+  gap: 7px;
+}
+
+.sale-history-entry,
+.day-history-entry {
+  border: 1px solid #edf0ea;
+  border-radius: 11px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.sale-history-entry > summary,
+.day-history-entry > summary {
+  min-height: 54px;
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.sale-history-entry > summary::-webkit-details-marker,
+.day-history-entry > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sale-history-entry > summary > span,
+.day-history-entry > summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.sale-history-entry > summary > span:last-child,
+.day-history-entry > summary > span:last-child {
+  grid-template-columns: auto 16px;
+  align-items: center;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+.sale-history-entry summary small,
+.day-history-entry summary small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sale-history-entry summary svg,
+.day-history-entry summary svg {
+  transition: transform 160ms ease;
+}
+
+.sale-history-entry[open] > summary svg,
+.day-history-entry[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.sale-history-entry__body,
+.day-history-entry__body {
+  border-top: 1px solid #edf0ea;
+  padding: 9px 11px;
+  background: #fafcf9;
+}
+
+.sale-history-line {
+  min-height: 38px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sale-history-line > div {
+  display: grid;
+  gap: 2px;
+}
+
+.sale-history-line small,
+.sale-history-line > span,
+.sale-history-note,
+.sale-history-totals {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sale-history-line > span {
+  color: #17210f;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sale-history-note {
+  margin: 2px 0;
+}
+
+.sale-history-totals {
+  border-top: 1px dashed #dfe6da;
+  padding-top: 8px;
+  display: flex;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.closing-chart__row {
+.sale-history-totals strong {
+  color: var(--green);
+}
+
+.sales-charts {
   display: grid;
-  grid-template-columns: 38px 1fr 72px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(112px, 0.65fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.metric-chart,
+.profit-donut-card {
+  border: 1px solid #edf0ea;
+  border-radius: 11px;
+  padding: 10px;
+  background: #fafcf9;
+}
+
+.metric-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.metric-chart__row {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 5px 7px;
   align-items: center;
-  color: #56604f;
-  font-size: 12px;
+}
+
+.metric-chart__row > span,
+.metric-chart__row > strong {
+  font-size: 11px;
   font-weight: 800;
 }
 
-.closing-chart__row div {
-  height: 10px;
+.metric-chart__row > strong {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.metric-chart__row > div {
+  grid-column: 1 / -1;
+  height: 8px;
   overflow: hidden;
   border-radius: 999px;
   background: #eef3eb;
 }
 
-.closing-chart__row i {
+.metric-chart__row i {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #3f8f18, #78bd45);
 }
 
-.closing-chart__row strong {
+.metric-chart__row--revenue i {
+  background: #4e9a2b;
+}
+
+.metric-chart__row--cost i {
+  background: #f0a62b;
+}
+
+.metric-chart__row--profit i {
+  background: #2c8f65;
+}
+
+.profit-donut-card {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+}
+
+.profit-donut {
+  width: 92px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.profit-donut > div {
+  width: 66px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  background: #fff;
+}
+
+.profit-donut span,
+.profit-donut strong {
+  display: block;
+}
+
+.profit-donut span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.profit-donut strong {
+  margin-top: 2px;
   color: #17210f;
-  text-align: right;
-  font-size: 12px;
+  font-size: 13px;
+}
+
+.profit-donut-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.profit-donut-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.profit-donut-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.profit-donut-legend .is-cost {
+  background: #f0a62b;
+}
+
+.profit-donut-legend .is-profit {
+  background: #2c8f65;
+}
+
+.seven-day-history {
+  margin-top: 2px;
+}
+
+.day-history-entry__body {
+  padding: 7px;
 }
 
 .closing-list {
@@ -2361,6 +2611,20 @@ p {
 }
 
 @media (max-width: 420px) {
+  .sales-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .profit-donut-card {
+    grid-template-columns: auto 1fr;
+    justify-content: center;
+  }
+
+  .profit-donut-legend {
+    display: grid;
+    justify-content: start;
+  }
+
   .receipt-preview-toolbar {
     width: min(100%, 360px);
   }

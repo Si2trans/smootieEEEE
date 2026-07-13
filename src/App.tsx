@@ -603,7 +603,7 @@ function App() {
       applySaleLocally(sale);
       setSaleItems([]);
       setSaleNote("");
-      setMessage("บันทึกยอดขายแล้ว");
+      setMessage("บันทึกรายการขายแล้ว");
       void syncPendingInBackground();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกยอดขายไม่สำเร็จ");
@@ -616,8 +616,9 @@ function App() {
     setSaving(true);
     setMessage("");
     try {
+      const existingClosing = dailyClosings.find((closing) => closing.businessDate === summary.date);
       const closing: DailyClosing = {
-        id: `close_${summary.date}_${Date.now()}`,
+        id: existingClosing?.id || `close_${summary.date}_${Date.now()}`,
         businessDate: summary.date,
         orderCount: summary.orderCount,
         itemCount: summary.itemCount,
@@ -764,6 +765,10 @@ function App() {
       const itemAmounts = form.getAll("itemAmount").map((value) => Number(value || 0));
       const itemUnits = form.getAll("itemUnit").map(String);
       const itemNotes = form.getAll("itemNote").map(String);
+      const submittedCategoryId = String(form.get("categoryId") || "");
+      const categoryId = categoryList.some((category) => category.id === submittedCategoryId)
+        ? (submittedCategoryId as CategoryId)
+        : recipeSource?.categoryId || "tea";
       const items: RecipeItem[] = itemIngredientIds
         .map((ingredientId, index) => {
           const typedName = itemIngredientNames[index]?.trim().toLowerCase() || "";
@@ -782,7 +787,7 @@ function App() {
       const savedRecipe: Recipe = {
         id: recipeId,
         name: String(form.get("name") || "สูตรใหม่"),
-        categoryId: String(form.get("categoryId") || "tea") as CategoryId,
+        categoryId,
         imageKey: recipeSource?.imageKey || "thai",
         imageUrl,
         status: String(form.get("status") || ""),
@@ -926,6 +931,7 @@ function App() {
           />
         ) : screen === "recipeForm" ? (
           <RecipeForm
+            key={editingRecipe?.id || (draftSourceName ? `duplicate-${draftSourceName}` : "new-recipe")}
             categories={categoryList}
             ingredients={ingredientList}
             isDuplicate={Boolean(draftRecipe && !editingRecipe)}
@@ -1583,7 +1589,12 @@ function SalesScreen({
     .filter((recipe) => recipe.name.toLowerCase().includes(normalizedSearch))
     .slice(0, normalizedSearch ? 10 : 3);
   const summary = summarizeSales(sales, date);
-  const existingClosing = closings.find((closing) => closing.businessDate === date);
+  const existingClosing = closings
+    .filter((closing) => closing.businessDate === date)
+    .sort((a, b) => b.closedAt.localeCompare(a.closedAt))[0];
+  const daySales = sales
+    .filter((sale) => sale.saleDate === date)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const parentItems = items.filter((item) => item.kind !== "topping");
   const childItems = items.filter((item) => item.kind === "topping");
 
@@ -1720,7 +1731,11 @@ function SalesScreen({
           <strong>{money(totals.profit)} บาท</strong>
         </div>
       </section>
-      <button className="submit-button" disabled={saving || !parentItems.length} onClick={onSubmit} type="button">บันทึกยอดขาย</button>
+      <button className="submit-button" disabled={saving || !parentItems.length} onClick={onSubmit} type="button">
+        {parentItems.length > 1 ? `บันทึก ${parentItems.length} เมนู` : "บันทึกรายการนี้"}
+      </button>
+
+      <SalesDayHistory date={date} sales={daySales} />
 
       <section className="closing-panel">
         <div className="detail-section__title">
@@ -1741,50 +1756,104 @@ function SalesScreen({
             <strong>{money(summary.profit)} บาท</strong>
           </div>
           <div>
-            <span>ออเดอร์</span>
+            <span>บันทึกแล้ว</span>
             <strong>{summary.orderCount}</strong>
           </div>
         </div>
-        <div className="closing-list">
-          {summarizeItems(sales, date).map((item) => (
-            <div key={`${item.kind}-${item.name}`}>
-              <span>{item.name}</span>
-              <strong>{item.qty} รายการ · {money(item.revenue)} บาท</strong>
-            </div>
-          ))}
-          {!summary.itemCount ? <p className="empty-text">วันนี้ยังไม่มียอดขายที่บันทึก</p> : null}
-        </div>
+        <p className="closing-hint">รวมจากรายการที่บันทึกไว้ของวันที่เลือก ปิดร้านแล้วก็ยังเพิ่มยอดและอัปเดตปิดร้านใหม่ได้</p>
         {existingClosing ? <p className="status-banner">วันนี้เคยบันทึกปิดร้านแล้วเมื่อ {formatReceiptDate(new Date(existingClosing.closedAt))}</p> : null}
         <button className="submit-button submit-button--light" disabled={saving || summary.orderCount === 0} onClick={() => onCloseDay(summary)} type="button">
-          บันทึกปิดร้าน
+          {existingClosing ? "อัปเดตยอดปิดร้าน" : "บันทึกปิดร้าน"}
         </button>
       </section>
-      <ClosingReport closings={closings} referenceDate={date} />
+      <ClosingReport closings={closings} referenceDate={date} sales={sales} />
     </>
   );
 }
 
-function ClosingReport({ closings, referenceDate }: { closings: DailyClosing[]; referenceDate: string }) {
+function SalesDayHistory({ date, sales }: { date: string; sales: Sale[] }) {
+  return (
+    <section className="sales-history-panel">
+      <div className="detail-section__title">
+        <div>
+          <h3>รายการที่บันทึกแล้ว</h3>
+          <small>{formatThaiDate(date)}</small>
+        </div>
+        <strong>{sales.length} ครั้ง</strong>
+      </div>
+      <div className="sales-history-list">
+        {sales.map((sale) => <SaleHistoryEntry key={sale.id} sale={sale} />)}
+        {!sales.length ? <p className="empty-text">ยังไม่มีรายการที่บันทึกในวันนี้</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function SaleHistoryEntry({ sale }: { sale: Sale }) {
+  const parentItems = sale.items.filter((item) => item.kind !== "topping" && !item.parentId);
+  const toppings = sale.items.filter((item) => item.kind === "topping");
+  const itemCount = parentItems.reduce((sum, item) => sum + item.qty, 0);
+
+  return (
+    <details className="sale-history-entry">
+      <summary>
+        <span>
+          <strong>{formatSaleTime(sale.createdAt)}</strong>
+          <small>{sale.channel} · {itemCount} เมนู</small>
+        </span>
+        <span>
+          <strong>{money(sale.totalRevenue)} บาท</strong>
+          <ChevronDown size={16} />
+        </span>
+      </summary>
+      <div className="sale-history-entry__body">
+        {parentItems.map((item) => {
+          const itemToppings = toppings.filter((topping) => topping.parentId === item.id);
+          return (
+            <div className="sale-history-line" key={item.id}>
+              <div>
+                <strong>{item.qty} × {item.name}</strong>
+                {itemToppings.map((topping) => <small key={topping.id}>+ {topping.name} × {topping.qty}</small>)}
+              </div>
+              <span>{money(item.lineRevenue + itemToppings.reduce((sum, topping) => sum + topping.lineRevenue, 0))}</span>
+            </div>
+          );
+        })}
+        {sale.note ? <p className="sale-history-note">หมายเหตุ: {sale.note}</p> : null}
+        <div className="sale-history-totals">
+          <span>ต้นทุน {money(sale.totalCost)}</span>
+          <strong>กำไร {money(sale.totalProfit)} บาท</strong>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ClosingReport({ closings, referenceDate, sales }: { closings: DailyClosing[]; referenceDate: string; sales: Sale[] }) {
   const [mode, setMode] = useState<ClosingReportMode>("week");
-  const reportRows = getClosingReportRows(closings, referenceDate, mode);
+  const reportRows = getSalesReportRows(sales, referenceDate, mode);
   const totals = reportRows.reduce(
-    (sum, closing) => ({
-      revenue: sum.revenue + closing.totalRevenue,
-      cost: sum.cost + closing.totalCost,
-      profit: sum.profit + closing.totalProfit
+    (sum, row) => ({
+      revenue: sum.revenue + row.revenue,
+      cost: sum.cost + row.cost,
+      profit: sum.profit + row.profit
     }),
     { revenue: 0, cost: 0, profit: 0 }
   );
-  const maxRevenue = Math.max(1, ...reportRows.map((closing) => closing.totalRevenue));
-  const history = closings
-    .slice()
-    .sort((a, b) => b.businessDate.localeCompare(a.businessDate))
-    .slice(0, 6);
+  const maxMetric = Math.max(1, totals.revenue, totals.cost, Math.max(0, totals.profit));
+  const positiveCost = Math.max(0, totals.cost);
+  const positiveProfit = Math.max(0, totals.profit);
+  const donutTotal = positiveCost + positiveProfit;
+  const costShare = donutTotal > 0 ? (positiveCost / donutTotal) * 100 : 0;
+  const recentHistory = getRecentDateKeys(referenceDate, 7)
+    .map((date) => ({ date, sales: sales.filter((sale) => sale.saleDate === date).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }))
+    .filter((row) => row.sales.length > 0);
+  const closedDates = new Set(closings.map((closing) => closing.businessDate));
 
   return (
     <section className="closing-panel closing-report">
       <div className="detail-section__title">
-        <h3>รายงานปิดร้าน</h3>
+        <h3>ภาพรวมยอดขาย</h3>
         <div className="report-toggle">
           <button className={mode === "week" ? "is-active" : ""} onClick={() => setMode("week")} type="button">7 วัน</button>
           <button className={mode === "month" ? "is-active" : ""} onClick={() => setMode("month")} type="button">เดือนนี้</button>
@@ -1804,27 +1873,56 @@ function ClosingReport({ closings, referenceDate }: { closings: DailyClosing[]; 
           <strong>{money(totals.profit)} บาท</strong>
         </div>
       </div>
-      <div className="closing-chart">
-        {reportRows.map((closing) => (
-          <div className="closing-chart__row" key={closing.businessDate}>
-            <span>{shortDateLabel(closing.businessDate)}</span>
-            <div>
-              <i style={{ width: `${Math.max(6, (closing.totalRevenue / maxRevenue) * 100)}%` }} />
+      <div className="sales-charts">
+        <div className="metric-chart" aria-label="กราฟเปรียบเทียบยอดขาย ต้นทุน และกำไร">
+          {[
+            { key: "revenue", label: "ยอดขาย", value: totals.revenue },
+            { key: "cost", label: "ต้นทุน", value: totals.cost },
+            { key: "profit", label: "กำไร", value: totals.profit }
+          ].map((metric) => (
+            <div className={`metric-chart__row metric-chart__row--${metric.key}`} key={metric.key}>
+              <span>{metric.label}</span>
+              <div><i style={{ width: `${Math.max(metric.value > 0 ? 5 : 0, (Math.max(0, metric.value) / maxMetric) * 100)}%` }} /></div>
+              <strong>{money(metric.value)}</strong>
             </div>
-            <strong>{money(closing.totalRevenue)}</strong>
+          ))}
+        </div>
+        <div className="profit-donut-card">
+          <div
+            aria-label={`ต้นทุน ${money(totals.cost)} บาท กำไร ${money(totals.profit)} บาท`}
+            className="profit-donut"
+            role="img"
+            style={{ background: donutTotal > 0 ? `conic-gradient(#f0a62b 0 ${costShare}%, #2c8f65 ${costShare}% 100%)` : "#edf0ea" }}
+          >
+            <div><span>กำไร</span><strong>{money(totals.profit)}</strong></div>
           </div>
-        ))}
-        {!reportRows.length ? <p className="empty-text">ยังไม่มีข้อมูลปิดร้านในช่วงนี้</p> : null}
+          <div className="profit-donut-legend">
+            <span><i className="is-cost" /> ต้นทุน</span>
+            <span><i className="is-profit" /> กำไร</span>
+          </div>
+        </div>
       </div>
-      <div className="closing-list">
-        <h4>ประวัติล่าสุด</h4>
-        {history.map((closing) => (
-          <div key={closing.id}>
-            <span>{formatThaiDate(closing.businessDate)}</span>
-            <strong>ยอด {money(closing.totalRevenue)} · กำไร {money(closing.totalProfit)}</strong>
-          </div>
-        ))}
-        {!history.length ? <p className="empty-text">ยังไม่มีประวัติปิดร้าน</p> : null}
+      {!reportRows.length ? <p className="empty-text">ยังไม่มียอดขายในช่วงนี้</p> : null}
+      <div className="seven-day-history">
+        <h4>ประวัติการขาย 7 วันล่าสุด</h4>
+        {recentHistory.map((row) => {
+          const daySummary = summarizeSales(row.sales, row.date);
+          return (
+            <details className="day-history-entry" key={row.date}>
+              <summary>
+                <span>
+                  <strong>{formatThaiDate(row.date)}</strong>
+                  <small>{daySummary.orderCount} ครั้ง · {daySummary.itemCount} เมนู{closedDates.has(row.date) ? " · ปิดร้านแล้ว" : ""}</small>
+                </span>
+                <span><strong>{money(daySummary.revenue)} บาท</strong><ChevronDown size={16} /></span>
+              </summary>
+              <div className="day-history-entry__body">
+                {row.sales.map((sale) => <SaleHistoryEntry key={sale.id} sale={sale} />)}
+              </div>
+            </details>
+          );
+        })}
+        {!recentHistory.length ? <p className="empty-text">ยังไม่มีประวัติการขายใน 7 วันล่าสุด</p> : null}
       </div>
     </section>
   );
@@ -2463,6 +2561,7 @@ function RecipeForm({
     recipe?.items.length ? recipe.items : [{ ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }]
   );
   const [imagePreview, setImagePreview] = useState(recipe?.imageUrl || "");
+  const [categoryId, setCategoryId] = useState<CategoryId>(recipe?.categoryId || "tea");
   const imageObjectUrl = useRef<string | null>(null);
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const pendingAddedItemIndex = useRef<number | null>(null);
@@ -2521,7 +2620,7 @@ function RecipeForm({
         <FormField defaultValue={recipe?.name} label="ชื่อเมนู" name="name" placeholder="เช่น ชาไทยไข่มุก" required />
         <label>
           หมวดหมู่
-          <select defaultValue={recipe?.categoryId || "tea"} name="categoryId">
+          <select name="categoryId" onChange={(event) => setCategoryId(event.currentTarget.value as CategoryId)} value={categoryId}>
             {categories.slice(1).map((category) => (
               <option value={category.id} key={category.id}>{category.label}</option>
             ))}
@@ -2865,16 +2964,24 @@ function todayKey() {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function getClosingReportRows(closings: DailyClosing[], referenceDate: string, mode: ClosingReportMode) {
+function getSalesReportRows(sales: Sale[], referenceDate: string, mode: ClosingReportMode) {
   const reference = parseDateKey(referenceDate) || new Date();
   const start = new Date(reference);
   if (mode === "week") start.setDate(reference.getDate() - 6);
   else start.setDate(1);
   const startKey = dateToKey(start);
   const endKey = dateToKey(reference);
-  return closings
-    .filter((closing) => closing.businessDate >= startKey && closing.businessDate <= endKey)
-    .sort((a, b) => a.businessDate.localeCompare(b.businessDate));
+  const dates = Array.from(new Set(sales.filter((sale) => sale.saleDate >= startKey && sale.saleDate <= endKey).map((sale) => sale.saleDate)));
+  return dates.sort().map((date) => summarizeSales(sales, date));
+}
+
+function getRecentDateKeys(referenceDate: string, days: number) {
+  const reference = parseDateKey(referenceDate) || new Date();
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(reference);
+    date.setDate(reference.getDate() - index);
+    return dateToKey(date);
+  });
 }
 
 function parseDateKey(value: string) {
@@ -2889,16 +2996,16 @@ function dateToKey(date: Date) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-function shortDateLabel(value: string) {
-  const date = parseDateKey(value);
-  if (!date) return value;
-  return `${date.getDate()}/${date.getMonth() + 1}`;
-}
-
 function formatThaiDate(value: string) {
   const date = parseDateKey(value);
   if (!date) return value;
   return date.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formatSaleTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "ไม่ระบุเวลา";
+  return date.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
 }
 
 function summarizeSales(sales: Sale[], date: string): SalesSummary {
@@ -2908,29 +3015,13 @@ function summarizeSales(sales: Sale[], date: string): SalesSummary {
       (summary, sale) => ({
         date,
         orderCount: summary.orderCount + 1,
-        itemCount: summary.itemCount + sale.items.reduce((sum, item) => sum + item.qty, 0),
+        itemCount: summary.itemCount + sale.items.filter((item) => item.kind !== "topping" && !item.parentId).reduce((sum, item) => sum + item.qty, 0),
         revenue: summary.revenue + sale.totalRevenue,
         cost: summary.cost + sale.totalCost,
         profit: summary.profit + sale.totalProfit
       }),
       { date, orderCount: 0, itemCount: 0, revenue: 0, cost: 0, profit: 0 }
     );
-}
-
-function summarizeItems(sales: Sale[], date: string) {
-  const byKey = new Map<string, { name: string; kind: SaleItemKind; qty: number; revenue: number; profit: number }>();
-  sales
-    .filter((sale) => sale.saleDate === date)
-    .flatMap((sale) => sale.items)
-    .forEach((item) => {
-      const key = `${item.kind}:${item.name}`;
-      const current = byKey.get(key) || { name: item.name, kind: item.kind, qty: 0, revenue: 0, profit: 0 };
-      current.qty += item.qty;
-      current.revenue += item.lineRevenue;
-      current.profit += item.lineProfit;
-      byKey.set(key, current);
-    });
-  return Array.from(byKey.values()).sort((a, b) => b.revenue - a.revenue);
 }
 
 function sanitizeFileName(value: string) {
