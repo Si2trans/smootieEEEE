@@ -193,6 +193,7 @@ function App() {
   const backgroundSyncRef = useRef<Promise<void> | null>(null);
   const preferredSelectedRecipeIdRef = useRef<string | null>(null);
   const receiptPaperRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!accessKey) {
@@ -621,7 +622,7 @@ function App() {
     setEditingSaleId(sale.id);
     setEditingSaleCreatedAt(sale.createdAt);
     setEditingSaleOriginalDate(sale.saleDate);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.requestAnimationFrame(() => contentRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
   }
 
   async function removeSale(sale: Sale) {
@@ -1045,7 +1046,7 @@ function App() {
           />
         ) : (
           <>
-            <main className="content">
+            <main className="content" ref={contentRef}>
               <SyncStatusBar onRefresh={refreshFromSheet} refreshing={refreshing} state={syncState} />
               {message ? <div className="status-banner">{message}</div> : null}
               {loading ? (
