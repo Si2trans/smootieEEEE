@@ -1,6 +1,7 @@
 import {
   deleteIngredient,
   deleteRecipe,
+  deleteSale,
   isAccessDeniedError,
   safeRecipeImageUrl,
   saveDailyClosing,
@@ -38,7 +39,7 @@ type SaveRecipeWithImagePayload = {
 
 export type SyncMutation = {
   id: string;
-  action: "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "saveDailyClosing";
+  action: "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "deleteSale" | "saveDailyClosing";
   entityId: string;
   payload: SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | SaveSaleInput | SaveDailyClosingInput | { id: string };
   createdAt: number;
@@ -155,8 +156,20 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
 
     if (mutation.action === "saveSale") {
       const sale = mutation.payload as SaveSaleInput;
-      const nextSale = { ...sale, createdAt: sale.createdAt || new Date().toISOString() };
+      const promotionAmount = Number(sale.promotionAmount || 0);
+      const nextSale = {
+        ...sale,
+        grossRevenue: Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount),
+        promotionName: sale.promotionName || "",
+        promotionAmount,
+        createdAt: sale.createdAt || new Date().toISOString()
+      };
       sales = sales.some((item) => item.id === sale.id) ? sales.map((item) => (item.id === sale.id ? nextSale : item)) : [nextSale, ...sales];
+      return;
+    }
+
+    if (mutation.action === "deleteSale") {
+      sales = sales.filter((sale) => sale.id !== mutation.entityId);
       return;
     }
 
@@ -232,6 +245,10 @@ async function executeMutation(mutation: SyncMutation) {
   }
   if (mutation.action === "saveSale") {
     await saveSale(mutation.payload as SaveSaleInput);
+    return;
+  }
+  if (mutation.action === "deleteSale") {
+    await deleteSale(mutation.entityId);
     return;
   }
   if (mutation.action === "saveDailyClosing") {

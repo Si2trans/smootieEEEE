@@ -164,7 +164,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.sales,
-      headers: ["id", "sale_date", "channel", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
+      headers: ["id", "sale_date", "channel", "gross_revenue", "promotion_name", "promotion_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
       rows: []
     },
     {
@@ -254,6 +254,7 @@ function doPost(e) {
     if (action === "calculateCost") return jsonResponse(calculateCost(payload.recipe_id));
     if (action === "uploadRecipeImage") return jsonResponse(uploadRecipeImage(payload));
     if (action === "saveSale") return jsonResponse(saveSale(payload));
+    if (action === "deleteSale") return jsonResponse(deleteSale(payload.id));
     if (action === "saveDailyClosing") return jsonResponse(saveDailyClosing(payload));
     return jsonResponse({ ok: false, error: "Unknown action: " + action }, 404);
   } catch (error) {
@@ -552,9 +553,19 @@ function saveSale(payload) {
   sale.id = cleanId(sale.id);
   sale.sale_date = cleanId(sale.sale_date);
   sale.channel = cleanId(sale.channel) || "หน้าร้าน";
-  sale.total_revenue = Number(sale.total_revenue || 0);
+  sale.promotion_name = cleanId(sale.promotion_name || "");
+  sale.promotion_amount = Number(sale.promotion_amount || 0);
+  if (!isFinite(sale.promotion_amount)) sale.promotion_amount = 0;
+  sale.promotion_amount = Math.max(0, sale.promotion_amount);
+  sale.gross_revenue = Number(sale.gross_revenue === undefined ? sale.total_revenue || 0 : sale.gross_revenue);
+  if (!isFinite(sale.gross_revenue)) sale.gross_revenue = 0;
+  sale.gross_revenue = Math.max(0, sale.gross_revenue);
+  sale.promotion_amount = Math.min(sale.promotion_amount, sale.gross_revenue);
+  sale.total_revenue = sale.gross_revenue - sale.promotion_amount;
   sale.total_cost = Number(sale.total_cost || 0);
-  sale.total_profit = Number(sale.total_profit || 0);
+  if (!isFinite(sale.total_cost)) sale.total_cost = 0;
+  sale.total_cost = Math.max(0, sale.total_cost);
+  sale.total_profit = sale.total_revenue - sale.total_cost;
   sale.note = cleanId(sale.note || "");
   if (!sale.created_at) sale.created_at = new Date().toISOString();
   sale.updated_at = new Date().toISOString();
@@ -580,6 +591,13 @@ function saveSale(payload) {
     saveObject(SHEETS.saleItems, item);
   });
   return { ok: true, sale: saved.item || sale, item_count: items.length };
+}
+
+function deleteSale(saleId) {
+  saleId = cleanId(saleId);
+  if (!saleId) throw new Error("Missing sale id.");
+  deleteSaleItems(saleId);
+  return deleteObject(SHEETS.sales, saleId);
 }
 
 function deleteSaleItems(saleId) {

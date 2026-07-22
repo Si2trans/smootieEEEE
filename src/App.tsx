@@ -153,6 +153,8 @@ function App() {
   const [orderCustomerName, setOrderCustomerName] = useState("");
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [orderNote, setOrderNote] = useState("");
+  const [orderPromotionName, setOrderPromotionName] = useState("");
+  const [orderPromotionAmount, setOrderPromotionAmount] = useState(0);
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
@@ -163,6 +165,11 @@ function App() {
   const [saleSearch, setSaleSearch] = useState("");
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([]);
   const [saleNote, setSaleNote] = useState("");
+  const [salePromotionName, setSalePromotionName] = useState("");
+  const [salePromotionAmount, setSalePromotionAmount] = useState(0);
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [editingSaleCreatedAt, setEditingSaleCreatedAt] = useState("");
+  const [editingSaleOriginalDate, setEditingSaleOriginalDate] = useState("");
   const [receiptPreviewOpen, setReceiptPreviewOpen] = useState(false);
   const [generatingReceiptPdf, setGeneratingReceiptPdf] = useState(false);
   const [generatingReceiptImage, setGeneratingReceiptImage] = useState(false);
@@ -253,8 +260,18 @@ function App() {
   }, [categoryList, ingredientList, recipes, searchQuery, selectedCategory, sortMode]);
 
   const selectedCost = selectedRecipe ? calculateCost(selectedRecipe, ingredientList) : null;
-  const orderTotal = orderItems.reduce((sum, item) => sum + orderItemTotal(item), 0);
-  const saleTotals = calculateSaleDraftTotals(saleItems);
+  const orderGrossTotal = orderItems.reduce((sum, item) => sum + orderItemTotal(item), 0);
+  const orderDiscount = clampPromotionAmount(orderPromotionAmount, orderGrossTotal);
+  const orderTotal = Math.max(0, orderGrossTotal - orderDiscount);
+  const saleDraftTotals = calculateSaleDraftTotals(saleItems);
+  const saleDiscount = clampPromotionAmount(salePromotionAmount, saleDraftTotals.revenue);
+  const saleTotals = {
+    ...saleDraftTotals,
+    grossRevenue: saleDraftTotals.revenue,
+    promotionAmount: saleDiscount,
+    revenue: Math.max(0, saleDraftTotals.revenue - saleDiscount),
+    profit: Math.max(0, saleDraftTotals.revenue - saleDiscount) - saleDraftTotals.cost
+  };
 
   function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[] }, selectedId?: string) {
     setCategoryList(data.categories);
@@ -545,10 +562,84 @@ function App() {
     setSaleItems((current) => current.filter((item) => item.id !== itemId && item.parentId !== itemId));
   }
 
-  function applySaleLocally(sale: Sale) {
-    const nextSales = sales.some((item) => item.id === sale.id) ? sales.map((item) => (item.id === sale.id ? sale : item)) : [sale, ...sales];
+  function storeSalesLocally(nextSales: Sale[], nextClosings = dailyClosings) {
     setSales(nextSales);
-    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales: nextSales, dailyClosings });
+    setDailyClosings(nextClosings);
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales: nextSales, dailyClosings: nextClosings });
+  }
+
+  async function refreshExistingClosings(dates: string[], nextSales: Sale[]) {
+    let nextClosings = dailyClosings;
+    for (const date of Array.from(new Set(dates.filter(Boolean)))) {
+      const existing = nextClosings.find((closing) => closing.businessDate === date);
+      if (!existing) continue;
+      const summary = summarizeSales(nextSales, date);
+      const closing: DailyClosing = {
+        ...existing,
+        orderCount: summary.orderCount,
+        itemCount: summary.itemCount,
+        totalRevenue: summary.revenue,
+        totalCost: summary.cost,
+        totalProfit: summary.profit,
+        closedAt: new Date().toISOString()
+      };
+      await enqueueMutation({ action: "saveDailyClosing", entityId: closing.id, payload: closing });
+      nextClosings = nextClosings.map((item) => (item.id === closing.id ? closing : item));
+    }
+    storeSalesLocally(nextSales, nextClosings);
+  }
+
+  function resetSaleEditor() {
+    setSaleItems([]);
+    setSaleNote("");
+    setSalePromotionName("");
+    setSalePromotionAmount(0);
+    setEditingSaleId(null);
+    setEditingSaleCreatedAt("");
+    setEditingSaleOriginalDate("");
+  }
+
+  function editSale(sale: Sale) {
+    setSaleItems(
+      sale.items.map((item) => ({
+        id: item.id,
+        parentId: item.parentId,
+        itemId: item.itemId,
+        kind: item.kind,
+        name: item.name,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        unitCost: item.unitCost,
+        note: item.note || ""
+      }))
+    );
+    setSaleDate(sale.saleDate);
+    setSaleChannel(sale.channel);
+    setSaleNote(sale.note || "");
+    setSalePromotionName(sale.promotionName || "");
+    setSalePromotionAmount(sale.promotionAmount || 0);
+    setEditingSaleId(sale.id);
+    setEditingSaleCreatedAt(sale.createdAt);
+    setEditingSaleOriginalDate(sale.saleDate);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function removeSale(sale: Sale) {
+    if (!window.confirm(`ลบยอดขาย ${money(sale.totalRevenue)} บาท รายการนี้ใช่ไหม?`)) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await enqueueMutation({ action: "deleteSale", entityId: sale.id, payload: { id: sale.id } });
+      const nextSales = sales.filter((item) => item.id !== sale.id);
+      if (editingSaleId === sale.id) resetSaleEditor();
+      await refreshExistingClosings([sale.saleDate], nextSales);
+      setMessage("ลบรายการขายแล้ว");
+      void syncPendingInBackground();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ลบรายการขายไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
   }
 
   function applyDailyClosingLocally(closing: DailyClosing) {
@@ -567,15 +658,19 @@ function App() {
     setSaving(true);
     setMessage("");
     try {
-      const saleId = `sale_${Date.now()}`;
+      const now = Date.now();
+      const saleId = editingSaleId || `sale_${now}`;
+      const itemIdMap = new Map(
+        saleItems.map((item, index) => [item.id, item.id.startsWith("sale_draft_") ? `sitem_${now}_${index}` : item.id])
+      );
       const items: SaleItem[] = saleItems.map((item, index) => {
         const multiplier = saleItemMultiplier(item, saleItems);
         const lineRevenue = multiplier * item.unitPrice;
         const lineCost = multiplier * item.unitCost;
         return {
-          id: `sitem_${Date.now()}_${index}`,
+          id: itemIdMap.get(item.id) || `sitem_${now}_${index}`,
           saleId,
-          parentId: item.parentId,
+          parentId: item.parentId ? itemIdMap.get(item.parentId) || item.parentId : undefined,
           itemId: item.itemId,
           kind: item.kind,
           name: item.name,
@@ -592,18 +687,24 @@ function App() {
         id: saleId,
         saleDate: saleDate || todayKey(),
         channel: saleChannel,
+        grossRevenue: saleTotals.grossRevenue,
+        promotionName: saleTotals.promotionAmount > 0 ? salePromotionName.trim() : "",
+        promotionAmount: saleTotals.promotionAmount,
         totalRevenue: saleTotals.revenue,
         totalCost: saleTotals.cost,
         totalProfit: saleTotals.profit,
         note: saleNote,
-        createdAt: new Date().toISOString(),
+        createdAt: editingSaleCreatedAt || new Date().toISOString(),
         items
       };
       await enqueueMutation({ action: "saveSale", entityId: sale.id, payload: sale });
-      applySaleLocally(sale);
-      setSaleItems([]);
-      setSaleNote("");
-      setMessage("บันทึกรายการขายแล้ว");
+      const nextSales = sales.some((item) => item.id === sale.id)
+        ? sales.map((item) => (item.id === sale.id ? sale : item))
+        : [sale, ...sales];
+      await refreshExistingClosings([editingSaleOriginalDate, sale.saleDate], nextSales);
+      const wasEditing = Boolean(editingSaleId);
+      resetSaleEditor();
+      setMessage(wasEditing ? "บันทึกการแก้ไขแล้ว" : "บันทึกรายการขายแล้ว");
       void syncPendingInBackground();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกยอดขายไม่สำเร็จ");
@@ -983,16 +1084,25 @@ function App() {
                   items={orderItems}
                   note={orderNote}
                   orderNumber={orderNumber}
+                  promotionAmount={orderPromotionAmount}
+                  promotionName={orderPromotionName}
                   recipes={recipes}
                   searchQuery={orderSearch}
+                  grossTotal={orderGrossTotal}
                   total={orderTotal}
                   onAddItem={addOrderItem}
                   onAddAddon={addOrderAddon}
                   onChannel={setOrderChannel}
-                  onClear={() => setOrderItems([])}
+                  onClear={() => {
+                    setOrderItems([]);
+                    setOrderPromotionName("");
+                    setOrderPromotionAmount(0);
+                  }}
                   onCustomerName={setOrderCustomerName}
                   onNote={setOrderNote}
                   onOrderNumber={setOrderNumber}
+                  onPromotionAmount={setOrderPromotionAmount}
+                  onPromotionName={setOrderPromotionName}
                   onPrint={printOrderReceipt}
                   onRemoveItem={removeOrderItem}
                   onRemoveAddon={removeOrderAddon}
@@ -1009,18 +1119,26 @@ function App() {
                   ingredients={ingredientList}
                   items={saleItems}
                   note={saleNote}
+                  promotionAmount={salePromotionAmount}
+                  promotionName={salePromotionName}
                   recipes={recipes}
                   sales={sales}
                   saving={saving}
                   searchQuery={saleSearch}
                   totals={saleTotals}
+                  editingSaleId={editingSaleId}
                   onAddRecipe={addSaleRecipe}
                   onAddTopping={addSaleTopping}
                   onChannel={setSaleChannel}
-                  onClear={() => setSaleItems([])}
+                  onCancelEdit={resetSaleEditor}
+                  onClear={resetSaleEditor}
                   onCloseDay={closeSalesDay}
+                  onDeleteSale={removeSale}
                   onDate={setSaleDate}
                   onNote={setSaleNote}
+                  onEditSale={editSale}
+                  onPromotionAmount={setSalePromotionAmount}
+                  onPromotionName={setSalePromotionName}
                   onRemoveItem={removeSaleItem}
                   onSearch={setSaleSearch}
                   onSubmit={submitSale}
@@ -1074,6 +1192,8 @@ function App() {
               items={orderItems}
               isGeneratingPdf={generatingReceiptPdf}
               note={orderNote}
+              promotionAmount={orderDiscount}
+              promotionName={orderPromotionName}
               onClose={() => setReceiptPreviewOpen(false)}
               onExportImage={exportReceiptImage}
               onExportPdf={exportReceiptPdf}
@@ -1083,6 +1203,7 @@ function App() {
               receiptRef={receiptPaperRef}
               settings={receiptPaperSettings}
               onSettingsChange={setReceiptPaperSettings}
+              grossTotal={orderGrossTotal}
               total={orderTotal}
             />
           </>
@@ -1335,8 +1456,11 @@ function OrderScreen({
   items,
   note,
   orderNumber,
+  promotionAmount,
+  promotionName,
   recipes,
   searchQuery,
+  grossTotal,
   total,
   onAddAddon,
   onAddItem,
@@ -1345,6 +1469,8 @@ function OrderScreen({
   onCustomerName,
   onNote,
   onOrderNumber,
+  onPromotionAmount,
+  onPromotionName,
   onPrint,
   onRemoveAddon,
   onRemoveItem,
@@ -1358,8 +1484,11 @@ function OrderScreen({
   items: OrderItem[];
   note: string;
   orderNumber: string;
+  promotionAmount: number;
+  promotionName: string;
   recipes: Recipe[];
   searchQuery: string;
+  grossTotal: number;
   total: number;
   onAddAddon: (itemId: string) => void;
   onAddItem: (recipe: Recipe) => void;
@@ -1368,6 +1497,8 @@ function OrderScreen({
   onCustomerName: (name: string) => void;
   onNote: (note: string) => void;
   onOrderNumber: (value: string) => void;
+  onPromotionAmount: (value: number) => void;
+  onPromotionName: (value: string) => void;
   onPrint: () => void;
   onRemoveAddon: (itemId: string, addonId: string) => void;
   onRemoveItem: (itemId: string) => void;
@@ -1520,17 +1651,89 @@ function OrderScreen({
         {!items.length ? <p className="empty-text">ยังไม่มีรายการในบิล แตะ + ที่เมนูเพื่อเพิ่ม</p> : null}
       </section>
 
+      <PromotionEditor
+        amount={promotionAmount}
+        grossTotal={grossTotal}
+        name={promotionName}
+        onAmount={onPromotionAmount}
+        onName={onPromotionName}
+      />
+
       <label className="order-note">
         หมายเหตุออเดอร์
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ลูกค้าขอรับเร็ว แยกถุง" value={note} />
       </label>
 
-      <section className="order-summary">
-        <span>ยอดรวม</span>
-        <strong>{money(total)} บาท</strong>
+      <section className="order-summary order-summary--stacked">
+        {promotionAmount > 0 ? (
+          <>
+            <div><span>ยอดก่อนลด</span><strong>{money(grossTotal)} บาท</strong></div>
+            <div className="is-discount"><span>{promotionName.trim() || "โปรโมชั่น"}</span><strong>-{money(clampPromotionAmount(promotionAmount, grossTotal))} บาท</strong></div>
+          </>
+        ) : null}
+        <div className="is-total"><span>ยอดสุทธิ</span><strong>{money(total)} บาท</strong></div>
       </section>
       <button className="submit-button" onClick={onPrint} type="button">สร้างบิล</button>
     </>
+  );
+}
+
+function PromotionEditor({
+  amount,
+  grossTotal,
+  name,
+  onAmount,
+  onName
+}: {
+  amount: number;
+  grossTotal: number;
+  name: string;
+  onAmount: (value: number) => void;
+  onName: (value: string) => void;
+}) {
+  const active = Boolean(name || amount);
+  if (!active) {
+    return (
+      <button className="promotion-add-button" onClick={() => onName("โปรโมชั่น")} type="button">
+        <Plus size={15} /> เพิ่มโปรโมชั่น
+      </button>
+    );
+  }
+
+  return (
+    <section className="promotion-panel">
+      <div className="promotion-panel__title">
+        <div><strong>โปรโมชั่น</strong><small>ใส่เฉพาะส่วนลดที่ร้านเป็นผู้รับผิดชอบ</small></div>
+        <button
+          aria-label="ลบโปรโมชั่น"
+          onClick={() => {
+            onName("");
+            onAmount(0);
+          }}
+          type="button"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+      <div className="promotion-fields">
+        <label>
+          ชื่อโปรโมชั่น
+          <input maxLength={80} onChange={(event) => onName(event.currentTarget.value)} placeholder="เช่น ส่วนลดร้านค้า" value={name} />
+        </label>
+        <label>
+          ส่วนลด (บาท)
+          <input
+            inputMode="decimal"
+            max={grossTotal}
+            min="0"
+            onChange={(event) => onAmount(Math.max(0, Number(event.currentTarget.value || 0)))}
+            type="number"
+            value={amount}
+          />
+        </label>
+      </div>
+      {amount > grossTotal && grossTotal > 0 ? <small className="promotion-warning">ส่วนลดสูงกว่ายอดสินค้า ระบบจะใช้ไม่เกิน {money(grossTotal)} บาท</small> : null}
+    </section>
   );
 }
 
@@ -1542,18 +1745,26 @@ function SalesScreen({
   ingredients,
   items,
   note,
+  promotionAmount,
+  promotionName,
   recipes,
   sales,
   saving,
   searchQuery,
   totals,
+  editingSaleId,
   onAddRecipe,
   onAddTopping,
+  onCancelEdit,
   onChannel,
   onClear,
   onCloseDay,
+  onDeleteSale,
   onDate,
   onNote,
+  onEditSale,
+  onPromotionAmount,
+  onPromotionName,
   onRemoveItem,
   onSearch,
   onSubmit,
@@ -1566,18 +1777,26 @@ function SalesScreen({
   ingredients: Ingredient[];
   items: SaleDraftItem[];
   note: string;
+  promotionAmount: number;
+  promotionName: string;
   recipes: Recipe[];
   sales: Sale[];
   saving: boolean;
   searchQuery: string;
-  totals: ReturnType<typeof calculateSaleDraftTotals>;
+  totals: ReturnType<typeof calculateSaleDraftTotals> & { grossRevenue: number; promotionAmount: number };
+  editingSaleId: string | null;
   onAddRecipe: (recipe: Recipe) => void;
   onAddTopping: (parentId: string, ingredient: Ingredient) => void;
+  onCancelEdit: () => void;
   onChannel: (channel: string) => void;
   onClear: () => void;
   onCloseDay: (summary: SalesSummary) => void;
+  onDeleteSale: (sale: Sale) => void;
   onDate: (date: string) => void;
   onNote: (note: string) => void;
+  onEditSale: (sale: Sale) => void;
+  onPromotionAmount: (value: number) => void;
+  onPromotionName: (value: string) => void;
   onRemoveItem: (itemId: string) => void;
   onSearch: (query: string) => void;
   onSubmit: () => void;
@@ -1601,6 +1820,12 @@ function SalesScreen({
   return (
     <>
       <TopTitle title="บันทึกขาย" />
+      {editingSaleId ? (
+        <section className="sale-edit-banner">
+          <div><strong>กำลังแก้ไขรายการเดิม</strong><small>บันทึกแล้วจะอัปเดตรายการนี้ ไม่สร้างรายการซ้ำ</small></div>
+          <button onClick={onCancelEdit} type="button">ยกเลิก</button>
+        </section>
+      ) : null}
       <section className="sales-panel">
         <label>
           วันที่ขาย
@@ -1708,14 +1933,34 @@ function SalesScreen({
         {!parentItems.length ? <p className="empty-text">แตะ + เพื่อเพิ่มเมนูที่ขายได้</p> : null}
       </section>
 
+      <PromotionEditor
+        amount={promotionAmount}
+        grossTotal={totals.grossRevenue}
+        name={promotionName}
+        onAmount={onPromotionAmount}
+        onName={onPromotionName}
+      />
+
       <label className="order-note">
         หมายเหตุยอดขาย
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ยอดจากสมุด หรือขายนอกรอบ" value={note} />
       </label>
 
       <section className="sales-summary-card">
+        {totals.promotionAmount > 0 ? (
+          <div>
+            <span>ยอดก่อนลด</span>
+            <strong>{money(totals.grossRevenue)} บาท</strong>
+          </div>
+        ) : null}
+        {totals.promotionAmount > 0 ? (
+          <div className="is-discount">
+            <span>{promotionName.trim() || "โปรโมชั่น"}</span>
+            <strong>-{money(totals.promotionAmount)} บาท</strong>
+          </div>
+        ) : null}
         <div>
-          <span>ยอดขาย</span>
+          <span>ยอดขายสุทธิ</span>
           <strong>{money(totals.revenue)} บาท</strong>
         </div>
         <div>
@@ -1732,10 +1977,10 @@ function SalesScreen({
         </div>
       </section>
       <button className="submit-button" disabled={saving || !parentItems.length} onClick={onSubmit} type="button">
-        {parentItems.length > 1 ? `บันทึก ${parentItems.length} เมนู` : "บันทึกรายการนี้"}
+        {editingSaleId ? "บันทึกการแก้ไข" : parentItems.length > 1 ? `บันทึก ${parentItems.length} เมนู` : "บันทึกรายการนี้"}
       </button>
 
-      <SalesDayHistory date={date} sales={daySales} />
+      <SalesDayHistory date={date} onDelete={onDeleteSale} onEdit={onEditSale} sales={daySales} />
 
       <section className="closing-panel">
         <div className="detail-section__title">
@@ -1766,12 +2011,12 @@ function SalesScreen({
           {existingClosing ? "อัปเดตยอดปิดร้าน" : "บันทึกปิดร้าน"}
         </button>
       </section>
-      <ClosingReport closings={closings} referenceDate={date} sales={sales} />
+      <ClosingReport closings={closings} onDelete={onDeleteSale} onEdit={onEditSale} referenceDate={date} sales={sales} />
     </>
   );
 }
 
-function SalesDayHistory({ date, sales }: { date: string; sales: Sale[] }) {
+function SalesDayHistory({ date, onDelete, onEdit, sales }: { date: string; onDelete: (sale: Sale) => void; onEdit: (sale: Sale) => void; sales: Sale[] }) {
   return (
     <section className="sales-history-panel">
       <div className="detail-section__title">
@@ -1782,14 +2027,14 @@ function SalesDayHistory({ date, sales }: { date: string; sales: Sale[] }) {
         <strong>{sales.length} ครั้ง</strong>
       </div>
       <div className="sales-history-list">
-        {sales.map((sale) => <SaleHistoryEntry key={sale.id} sale={sale} />)}
+        {sales.map((sale) => <SaleHistoryEntry key={sale.id} onDelete={onDelete} onEdit={onEdit} sale={sale} />)}
         {!sales.length ? <p className="empty-text">ยังไม่มีรายการที่บันทึกในวันนี้</p> : null}
       </div>
     </section>
   );
 }
 
-function SaleHistoryEntry({ sale }: { sale: Sale }) {
+function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) => void; onEdit: (sale: Sale) => void; sale: Sale }) {
   const parentItems = sale.items.filter((item) => item.kind !== "topping" && !item.parentId);
   const toppings = sale.items.filter((item) => item.kind === "topping");
   const itemCount = parentItems.reduce((sum, item) => sum + item.qty, 0);
@@ -1819,17 +2064,39 @@ function SaleHistoryEntry({ sale }: { sale: Sale }) {
             </div>
           );
         })}
+        {sale.promotionAmount > 0 ? (
+          <div className="sale-history-promotion">
+            <span>{sale.promotionName || "โปรโมชั่น"}</span>
+            <strong>-{money(sale.promotionAmount)} บาท</strong>
+          </div>
+        ) : null}
         {sale.note ? <p className="sale-history-note">หมายเหตุ: {sale.note}</p> : null}
         <div className="sale-history-totals">
           <span>ต้นทุน {money(sale.totalCost)}</span>
           <strong>กำไร {money(sale.totalProfit)} บาท</strong>
+        </div>
+        <div className="sale-history-actions">
+          <button onClick={() => onEdit(sale)} type="button"><Pencil size={14} /> แก้ไข</button>
+          <button onClick={() => onDelete(sale)} type="button"><Trash2 size={14} /> ลบ</button>
         </div>
       </div>
     </details>
   );
 }
 
-function ClosingReport({ closings, referenceDate, sales }: { closings: DailyClosing[]; referenceDate: string; sales: Sale[] }) {
+function ClosingReport({
+  closings,
+  onDelete,
+  onEdit,
+  referenceDate,
+  sales
+}: {
+  closings: DailyClosing[];
+  onDelete: (sale: Sale) => void;
+  onEdit: (sale: Sale) => void;
+  referenceDate: string;
+  sales: Sale[];
+}) {
   const [mode, setMode] = useState<ClosingReportMode>("week");
   const reportRows = getSalesReportRows(sales, referenceDate, mode);
   const totals = reportRows.reduce(
@@ -1917,7 +2184,7 @@ function ClosingReport({ closings, referenceDate, sales }: { closings: DailyClos
                 <span><strong>{money(daySummary.revenue)} บาท</strong><ChevronDown size={16} /></span>
               </summary>
               <div className="day-history-entry__body">
-                {row.sales.map((sale) => <SaleHistoryEntry key={sale.id} sale={sale} />)}
+                {row.sales.map((sale) => <SaleHistoryEntry key={sale.id} onDelete={onDelete} onEdit={onEdit} sale={sale} />)}
               </div>
             </details>
           );
@@ -1935,6 +2202,8 @@ function OrderReceipt({
   isGeneratingPdf,
   items,
   note,
+  promotionAmount,
+  promotionName,
   onClose,
   onExportImage,
   onExportPdf,
@@ -1944,6 +2213,7 @@ function OrderReceipt({
   receiptRef,
   settings,
   onSettingsChange,
+  grossTotal,
   total
 }: {
   channel: string;
@@ -1952,6 +2222,8 @@ function OrderReceipt({
   isGeneratingPdf: boolean;
   items: OrderItem[];
   note: string;
+  promotionAmount: number;
+  promotionName: string;
   onClose: () => void;
   onExportImage: () => void;
   onExportPdf: () => void;
@@ -1961,6 +2233,7 @@ function OrderReceipt({
   receiptRef: RefObject<HTMLDivElement>;
   settings: ReceiptPaperSettings;
   onSettingsChange: (settings: ReceiptPaperSettings) => void;
+  grossTotal: number;
   total: number;
 }) {
   const splitSidePadding = settings.paddingLeftMm !== settings.paddingRightMm;
@@ -2132,10 +2405,13 @@ function OrderReceipt({
           ))}
         </section>
         <div className="receipt-divider" />
-        <div className="receipt-total">
-          <span>ยอดรวม</span>
-          <strong>{money(total)} บาท</strong>
-        </div>
+        {promotionAmount > 0 ? (
+          <div className="receipt-adjustments">
+            <div><span>ยอดก่อนลด</span><strong>{money(grossTotal)} บาท</strong></div>
+            <div><span>{promotionName.trim() || "โปรโมชั่น"}</span><strong>-{money(promotionAmount)} บาท</strong></div>
+          </div>
+        ) : null}
+        <div className="receipt-total"><span>ยอดสุทธิ</span><strong>{money(total)} บาท</strong></div>
         {note ? (
           <>
             <div className="receipt-divider" />
@@ -2923,6 +3199,12 @@ function formatReceiptDate(date: Date) {
 function orderItemTotal(item: OrderItem) {
   const addonTotal = item.addons.reduce((sum, addon) => sum + addon.price, 0);
   return (item.unitPrice + addonTotal) * item.qty;
+}
+
+function clampPromotionAmount(amount: number, grossRevenue: number) {
+  const safeAmount = Number.isFinite(amount) ? Math.max(0, amount) : 0;
+  const safeGross = Number.isFinite(grossRevenue) ? Math.max(0, grossRevenue) : 0;
+  return Math.min(safeAmount, safeGross);
 }
 
 function orderUnitPrice(recipe: Recipe, channel: string) {

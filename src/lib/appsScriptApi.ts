@@ -154,11 +154,16 @@ export async function saveIngredient(input: SaveIngredientInput) {
 }
 
 export async function saveSale(input: SaveSaleInput) {
+  const promotionAmount = Number(input.promotionAmount || 0);
+  const grossRevenue = Number(input.grossRevenue ?? Number(input.totalRevenue || 0) + promotionAmount);
   return postAction("saveSale", {
     sale: {
       id: input.id || `sale_${Date.now()}`,
       sale_date: input.saleDate,
       channel: input.channel,
+      gross_revenue: grossRevenue,
+      promotion_name: input.promotionName || "",
+      promotion_amount: promotionAmount,
       total_revenue: Number(input.totalRevenue || 0),
       total_cost: Number(input.totalCost || 0),
       total_profit: Number(input.totalProfit || 0),
@@ -182,6 +187,10 @@ export async function saveSale(input: SaveSaleInput) {
       sort_order: index + 1
     }))
   });
+}
+
+export async function deleteSale(id: string) {
+  return postAction("deleteSale", { id });
 }
 
 export async function saveDailyClosing(input: SaveDailyClosingInput) {
@@ -386,11 +395,16 @@ function normalizeSales(saleRows: Array<Record<string, unknown>>, itemRows: Arra
   return saleRows
     .map((row) => {
       const id = text(row.id);
+      const promotionAmount = number(row.promotion_amount || row.promotionAmount);
+      const totalRevenue = number(row.total_revenue || row.totalRevenue);
       return {
         id,
         saleDate: businessDateKey(row.sale_date || row.saleDate),
         channel: text(row.channel) || "หน้าร้าน",
-        totalRevenue: number(row.total_revenue || row.totalRevenue),
+        grossRevenue: number(row.gross_revenue || row.grossRevenue, totalRevenue + promotionAmount),
+        promotionName: text(row.promotion_name || row.promotionName),
+        promotionAmount,
+        totalRevenue,
         totalCost: number(row.total_cost || row.totalCost),
         totalProfit: number(row.total_profit || row.totalProfit),
         note: text(row.note),

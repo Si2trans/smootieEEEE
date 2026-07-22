@@ -80,6 +80,9 @@ export type Sale = {
   id: string;
   saleDate: string;
   channel: string;
+  grossRevenue: number;
+  promotionName?: string;
+  promotionAmount: number;
   totalRevenue: number;
   totalCost: number;
   totalProfit: number;
