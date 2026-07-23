@@ -164,7 +164,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.sales,
-      headers: ["id", "sale_date", "channel", "gross_revenue", "promotion_name", "promotion_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
+      headers: ["id", "sale_date", "channel", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
       rows: []
     },
     {
@@ -561,7 +561,10 @@ function saveSale(payload) {
   if (!isFinite(sale.gross_revenue)) sale.gross_revenue = 0;
   sale.gross_revenue = Math.max(0, sale.gross_revenue);
   sale.promotion_amount = Math.min(sale.promotion_amount, sale.gross_revenue);
-  sale.total_revenue = sale.gross_revenue - sale.promotion_amount;
+  const subtotalAfterPromotion = roundCurrency(sale.gross_revenue - sale.promotion_amount);
+  sale.gp_rate = isDeliveryChannel(sale.channel) ? 32.1 : 0;
+  sale.gp_amount = roundCurrency((subtotalAfterPromotion * sale.gp_rate) / 100);
+  sale.total_revenue = roundCurrency(Math.max(0, subtotalAfterPromotion - sale.gp_amount));
   sale.total_cost = Number(sale.total_cost || 0);
   if (!isFinite(sale.total_cost)) sale.total_cost = 0;
   sale.total_cost = Math.max(0, sale.total_cost);
@@ -591,6 +594,14 @@ function saveSale(payload) {
     saveObject(SHEETS.saleItems, item);
   });
   return { ok: true, sale: saved.item || sale, item_count: items.length };
+}
+
+function isDeliveryChannel(channel) {
+  return ["LINE MAN", "Grab", "ShopeeFood"].indexOf(cleanId(channel)) >= 0;
+}
+
+function roundCurrency(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
 function deleteSale(saleId) {

@@ -19,6 +19,7 @@ import type {
   UploadImageInput
 } from "./appsScriptApi";
 import type { Recipe } from "../types/app";
+import { calculateSaleRevenue } from "./sales";
 
 const DB_NAME = "drink-cost-studio-sync";
 const DB_VERSION = 1;
@@ -157,11 +158,16 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
     if (mutation.action === "saveSale") {
       const sale = mutation.payload as SaveSaleInput;
       const promotionAmount = Number(sale.promotionAmount || 0);
+      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel);
       const nextSale = {
         ...sale,
-        grossRevenue: Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount),
+        grossRevenue: revenue.grossRevenue,
         promotionName: sale.promotionName || "",
-        promotionAmount,
+        promotionAmount: revenue.promotionAmount,
+        gpRate: revenue.gpRate,
+        gpAmount: revenue.gpAmount,
+        totalRevenue: revenue.netRevenue,
+        totalProfit: revenue.netRevenue - sale.totalCost,
         createdAt: sale.createdAt || new Date().toISOString()
       };
       sales = sales.some((item) => item.id === sale.id) ? sales.map((item) => (item.id === sale.id ? nextSale : item)) : [nextSale, ...sales];

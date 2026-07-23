@@ -83,6 +83,8 @@ export type Sale = {
   grossRevenue: number;
   promotionName?: string;
   promotionAmount: number;
+  gpRate: number;
+  gpAmount: number;
   totalRevenue: number;
   totalCost: number;
   totalProfit: number;

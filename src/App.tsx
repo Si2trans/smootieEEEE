@@ -52,6 +52,7 @@ import {
 } from "./lib/syncQueue";
 import type { SyncState } from "./lib/syncQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
+import { calculateSaleRevenue } from "./lib/sales";
 import type { Category, CategoryId, DailyClosing, Ingredient, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
@@ -266,12 +267,12 @@ function App() {
   const orderTotal = Math.max(0, orderGrossTotal - orderDiscount);
   const saleDraftTotals = calculateSaleDraftTotals(saleItems);
   const saleDiscount = clampPromotionAmount(salePromotionAmount, saleDraftTotals.revenue);
+  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel);
   const saleTotals = {
     ...saleDraftTotals,
-    grossRevenue: saleDraftTotals.revenue,
-    promotionAmount: saleDiscount,
-    revenue: Math.max(0, saleDraftTotals.revenue - saleDiscount),
-    profit: Math.max(0, saleDraftTotals.revenue - saleDiscount) - saleDraftTotals.cost
+    ...saleRevenue,
+    revenue: saleRevenue.netRevenue,
+    profit: saleRevenue.netRevenue - saleDraftTotals.cost
   };
 
   function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[] }, selectedId?: string) {
@@ -691,6 +692,8 @@ function App() {
         grossRevenue: saleTotals.grossRevenue,
         promotionName: saleTotals.promotionAmount > 0 ? salePromotionName.trim() : "",
         promotionAmount: saleTotals.promotionAmount,
+        gpRate: saleTotals.gpRate,
+        gpAmount: saleTotals.gpAmount,
         totalRevenue: saleTotals.revenue,
         totalCost: saleTotals.cost,
         totalProfit: saleTotals.profit,
@@ -1784,7 +1787,7 @@ function SalesScreen({
   sales: Sale[];
   saving: boolean;
   searchQuery: string;
-  totals: ReturnType<typeof calculateSaleDraftTotals> & { grossRevenue: number; promotionAmount: number };
+  totals: ReturnType<typeof calculateSaleDraftTotals> & ReturnType<typeof calculateSaleRevenue> & { revenue: number };
   editingSaleId: string | null;
   onAddRecipe: (recipe: Recipe) => void;
   onAddTopping: (parentId: string, ingredient: Ingredient) => void;
@@ -1960,8 +1963,20 @@ function SalesScreen({
             <strong>-{money(totals.promotionAmount)} บาท</strong>
           </div>
         ) : null}
+        {totals.gpAmount > 0 ? (
+          <div>
+            <span>{totals.promotionAmount > 0 ? "ยอดหลังโปรโมชั่น" : "ยอดก่อนหัก GP"}</span>
+            <strong>{money(totals.subtotalAfterPromotion)} บาท</strong>
+          </div>
+        ) : null}
+        {totals.gpAmount > 0 ? (
+          <div className="is-discount">
+            <span>ค่า GP {totals.gpRate.toFixed(2)}%</span>
+            <strong>-{money(totals.gpAmount)} บาท</strong>
+          </div>
+        ) : null}
         <div>
-          <span>ยอดขายสุทธิ</span>
+          <span>รายรับสุทธิ</span>
           <strong>{money(totals.revenue)} บาท</strong>
         </div>
         <div>
@@ -1990,7 +2005,7 @@ function SalesScreen({
         </div>
         <div className="sales-summary-card sales-summary-card--closing">
           <div>
-            <span>ยอดขายรวม</span>
+            <span>รายรับสุทธิรวม</span>
             <strong>{money(summary.revenue)} บาท</strong>
           </div>
           <div>
@@ -2071,6 +2086,12 @@ function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) =
             <strong>-{money(sale.promotionAmount)} บาท</strong>
           </div>
         ) : null}
+        {sale.gpAmount > 0 ? (
+          <div className="sale-history-promotion">
+            <span>ค่า GP {sale.gpRate.toFixed(2)}%</span>
+            <strong>-{money(sale.gpAmount)} บาท</strong>
+          </div>
+        ) : null}
         {sale.note ? <p className="sale-history-note">หมายเหตุ: {sale.note}</p> : null}
         <div className="sale-history-totals">
           <span>ต้นทุน {money(sale.totalCost)}</span>
@@ -2129,7 +2150,7 @@ function ClosingReport({
       </div>
       <div className="sales-summary-card sales-summary-card--report">
         <div>
-          <span>ยอดขายรวม</span>
+          <span>รายรับสุทธิรวม</span>
           <strong>{money(totals.revenue)} บาท</strong>
         </div>
         <div>
@@ -2142,9 +2163,9 @@ function ClosingReport({
         </div>
       </div>
       <div className="sales-charts">
-        <div className="metric-chart" aria-label="กราฟเปรียบเทียบยอดขาย ต้นทุน และกำไร">
+        <div className="metric-chart" aria-label="กราฟเปรียบเทียบรายรับสุทธิ ต้นทุน และกำไร">
           {[
-            { key: "revenue", label: "ยอดขาย", value: totals.revenue },
+            { key: "revenue", label: "รายรับ", value: totals.revenue },
             { key: "cost", label: "ต้นทุน", value: totals.cost },
             { key: "profit", label: "กำไร", value: totals.profit }
           ].map((metric) => (
