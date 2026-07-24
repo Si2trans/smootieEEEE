@@ -95,7 +95,8 @@ type SalesSummary = {
   cost: number;
   profit: number;
 };
-type ClosingReportMode = "week" | "month";
+type ClosingReportMode = "week" | "month" | "custom";
+type ReportDateRange = { start: string; end: string };
 type ReceiptPaperPresetId = "a9max77" | "a956" | "receipt57" | "custom";
 type ReceiptPaperSettings = {
   presetId: ReceiptPaperPresetId;
@@ -2027,7 +2028,7 @@ function SalesScreen({
           {existingClosing ? "อัปเดตยอดปิดร้าน" : "บันทึกปิดร้าน"}
         </button>
       </section>
-      <ClosingReport closings={closings} onDelete={onDeleteSale} onEdit={onEditSale} referenceDate={date} sales={sales} />
+      <ClosingReport closings={closings} onDelete={onDeleteSale} onEdit={onEditSale} sales={sales} />
     </>
   );
 }
@@ -2110,17 +2111,18 @@ function ClosingReport({
   closings,
   onDelete,
   onEdit,
-  referenceDate,
   sales
 }: {
   closings: DailyClosing[];
   onDelete: (sale: Sale) => void;
   onEdit: (sale: Sale) => void;
-  referenceDate: string;
   sales: Sale[];
 }) {
   const [mode, setMode] = useState<ClosingReportMode>("week");
-  const reportRows = getSalesReportRows(sales, referenceDate, mode);
+  const [customStart, setCustomStart] = useState(() => offsetDateKey(todayKey(), -6));
+  const [customEnd, setCustomEnd] = useState(() => todayKey());
+  const reportRange = getReportDateRange(todayKey(), mode, customStart, customEnd);
+  const reportRows = getSalesReportRows(sales, reportRange.start, reportRange.end);
   const totals = reportRows.reduce(
     (sum, row) => ({
       revenue: sum.revenue + row.revenue,
@@ -2134,10 +2136,15 @@ function ClosingReport({
   const positiveProfit = Math.max(0, totals.profit);
   const donutTotal = positiveCost + positiveProfit;
   const costShare = donutTotal > 0 ? (positiveCost / donutTotal) * 100 : 0;
-  const recentHistory = getRecentDateKeys(referenceDate, 7)
-    .map((date) => ({ date, sales: sales.filter((sale) => sale.saleDate === date).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) }))
-    .filter((row) => row.sales.length > 0);
+  const rangeHistory = reportRows
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((row) => ({
+      summary: row,
+      sales: sales.filter((sale) => sale.saleDate === row.date).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    }));
   const closedDates = new Set(closings.map((closing) => closing.businessDate));
+  const rangeLabel = mode === "week" ? "7 วันล่าสุด" : mode === "month" ? "เดือนนี้" : `${formatThaiDate(reportRange.start)} – ${formatThaiDate(reportRange.end)}`;
 
   return (
     <section className="closing-panel closing-report">
@@ -2146,8 +2153,39 @@ function ClosingReport({
         <div className="report-toggle">
           <button className={mode === "week" ? "is-active" : ""} onClick={() => setMode("week")} type="button">7 วัน</button>
           <button className={mode === "month" ? "is-active" : ""} onClick={() => setMode("month")} type="button">เดือนนี้</button>
+          <button className={mode === "custom" ? "is-active" : ""} onClick={() => setMode("custom")} type="button">กำหนดเอง</button>
         </div>
       </div>
+      {mode === "custom" ? (
+        <div className="report-range-fields">
+          <label>
+            วันเริ่มต้น
+            <input
+              max={customEnd}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setCustomStart(value);
+                if (customEnd < value) setCustomEnd(value);
+              }}
+              type="date"
+              value={customStart}
+            />
+          </label>
+          <label>
+            วันสิ้นสุด
+            <input
+              min={customStart}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setCustomEnd(value);
+                if (customStart > value) setCustomStart(value);
+              }}
+              type="date"
+              value={customEnd}
+            />
+          </label>
+        </div>
+      ) : null}
       <div className="sales-summary-card sales-summary-card--report">
         <div>
           <span>รายรับสุทธิรวม</span>
@@ -2193,17 +2231,25 @@ function ClosingReport({
       </div>
       {!reportRows.length ? <p className="empty-text">ยังไม่มียอดขายในช่วงนี้</p> : null}
       <div className="seven-day-history">
-        <h4>ประวัติการขาย 7 วันล่าสุด</h4>
-        {recentHistory.map((row) => {
-          const daySummary = summarizeSales(row.sales, row.date);
+        <div className="report-history-title">
+          <h4>สรุปยอดขายรายวัน</h4>
+          <span>{rangeLabel}</span>
+        </div>
+        {rangeHistory.map((row) => {
+          const daySummary = row.summary;
           return (
-            <details className="day-history-entry" key={row.date}>
+            <details className="day-history-entry" key={daySummary.date}>
               <summary>
                 <span>
-                  <strong>{formatThaiDate(row.date)}</strong>
-                  <small>{daySummary.orderCount} ครั้ง · {daySummary.itemCount} เมนู{closedDates.has(row.date) ? " · ปิดร้านแล้ว" : ""}</small>
+                  <strong>{formatThaiDate(daySummary.date)}</strong>
+                  <small>{daySummary.orderCount} ครั้ง · {daySummary.itemCount} เมนู{closedDates.has(daySummary.date) ? " · ปิดร้านแล้ว" : ""}</small>
                 </span>
-                <span><strong>{money(daySummary.revenue)} บาท</strong><ChevronDown size={16} /></span>
+                <ChevronDown size={16} />
+                <div className="day-history-metrics">
+                  <span><small>รายรับ</small><strong>{money(daySummary.revenue)}</strong></span>
+                  <span><small>ต้นทุน</small><strong>{money(daySummary.cost)}</strong></span>
+                  <span><small>กำไร</small><strong>{money(daySummary.profit)}</strong></span>
+                </div>
               </summary>
               <div className="day-history-entry__body">
                 {row.sales.map((sale) => <SaleHistoryEntry key={sale.id} onDelete={onDelete} onEdit={onEdit} sale={sale} />)}
@@ -2211,7 +2257,7 @@ function ClosingReport({
             </details>
           );
         })}
-        {!recentHistory.length ? <p className="empty-text">ยังไม่มีประวัติการขายใน 7 วันล่าสุด</p> : null}
+        {!rangeHistory.length ? <p className="empty-text">ยังไม่มีประวัติการขายในช่วงนี้</p> : null}
       </div>
     </section>
   );
@@ -3268,24 +3314,31 @@ function todayKey() {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function getSalesReportRows(sales: Sale[], referenceDate: string, mode: ClosingReportMode) {
-  const reference = parseDateKey(referenceDate) || new Date();
-  const start = new Date(reference);
-  if (mode === "week") start.setDate(reference.getDate() - 6);
-  else start.setDate(1);
-  const startKey = dateToKey(start);
-  const endKey = dateToKey(reference);
-  const dates = Array.from(new Set(sales.filter((sale) => sale.saleDate >= startKey && sale.saleDate <= endKey).map((sale) => sale.saleDate)));
+function getSalesReportRows(sales: Sale[], startDate: string, endDate: string) {
+  const dates = Array.from(new Set(sales.filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate).map((sale) => sale.saleDate)));
   return dates.sort().map((date) => summarizeSales(sales, date));
 }
 
-function getRecentDateKeys(referenceDate: string, days: number) {
+function getReportDateRange(referenceDate: string, mode: ClosingReportMode, customStart: string, customEnd: string): ReportDateRange {
   const reference = parseDateKey(referenceDate) || new Date();
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(reference);
-    date.setDate(reference.getDate() - index);
-    return dateToKey(date);
-  });
+  if (mode === "custom") {
+    const start = parseDateKey(customStart) ? customStart : dateToKey(reference);
+    const end = parseDateKey(customEnd) ? customEnd : start;
+    return start <= end ? { start, end } : { start: end, end: start };
+  }
+  if (mode === "month") {
+    return {
+      start: dateToKey(new Date(reference.getFullYear(), reference.getMonth(), 1)),
+      end: dateToKey(new Date(reference.getFullYear(), reference.getMonth() + 1, 0))
+    };
+  }
+  return { start: offsetDateKey(dateToKey(reference), -6), end: dateToKey(reference) };
+}
+
+function offsetDateKey(value: string, days: number) {
+  const date = parseDateKey(value) || new Date();
+  date.setDate(date.getDate() + days);
+  return dateToKey(date);
 }
 
 function parseDateKey(value: string) {

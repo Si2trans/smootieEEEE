@@ -2350,7 +2350,9 @@ p {
 }
 
 .report-toggle {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
   padding: 3px;
   border-radius: 999px;
   background: #f3f6f1;
@@ -2374,6 +2376,40 @@ p {
   margin-bottom: 8px;
 }
 
+.closing-report > .detail-section__title {
+  display: grid;
+  gap: 9px;
+}
+
+.report-range-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-radius: 11px;
+  padding: 10px;
+  background: #f7faf4;
+}
+
+.report-range-fields label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.report-range-fields input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #dfe6da;
+  border-radius: 9px;
+  padding: 6px 8px;
+  background: #fff;
+  color: #17210f;
+}
+
 .closing-hint {
   margin: 0;
   color: var(--muted);
@@ -2385,6 +2421,19 @@ p {
 .seven-day-history h4 {
   margin: 0;
   font-size: 15px;
+}
+
+.report-history-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.report-history-title span {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
 }
 
 .sales-history-panel .detail-section__title > div:first-child {
@@ -2427,6 +2476,46 @@ p {
   gap: 10px;
   cursor: pointer;
   list-style: none;
+}
+
+.day-history-entry > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+}
+
+.day-history-entry > summary > svg {
+  justify-self: end;
+  color: var(--green);
+}
+
+.day-history-metrics {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.day-history-metrics > span {
+  min-width: 0;
+  border-radius: 8px;
+  padding: 7px;
+  display: grid;
+  gap: 2px;
+  background: #f5f8f2;
+}
+
+.day-history-metrics small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.day-history-metrics strong {
+  overflow: hidden;
+  color: var(--green);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sale-history-entry > summary::-webkit-details-marker,
