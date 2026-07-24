@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -22,7 +23,8 @@ import {
   Sparkles,
   Store,
   Trash2,
-  WalletCards
+  WalletCards,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElementType, FormEvent, ReactNode, RefObject } from "react";
@@ -97,6 +99,8 @@ type SalesSummary = {
 };
 type ClosingReportMode = "week" | "month" | "custom";
 type ReportDateRange = { start: string; end: string };
+type TopSellingMenuMode = "week" | "month";
+type TopSellingMenu = { itemId: string; name: string; quantity: number; revenue: number };
 type ReceiptPaperPresetId = "a9max77" | "a956" | "receipt57" | "custom";
 type ReceiptPaperSettings = {
   presetId: ReceiptPaperPresetId;
@@ -2121,6 +2125,16 @@ function ClosingReport({
   const [mode, setMode] = useState<ClosingReportMode>("week");
   const [customStart, setCustomStart] = useState(() => offsetDateKey(todayKey(), -6));
   const [customEnd, setCustomEnd] = useState(() => todayKey());
+  const [topMenuMode, setTopMenuMode] = useState<TopSellingMenuMode>("week");
+  const [topMenuOpen, setTopMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!topMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTopMenuOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [topMenuOpen]);
   const reportRange = getReportDateRange(todayKey(), mode, customStart, customEnd);
   const reportRows = getSalesReportRows(sales, reportRange.start, reportRange.end);
   const totals = reportRows.reduce(
@@ -2145,15 +2159,23 @@ function ClosingReport({
     }));
   const closedDates = new Set(closings.map((closing) => closing.businessDate));
   const rangeLabel = mode === "week" ? "7 วันล่าสุด" : mode === "month" ? "เดือนนี้" : `${formatThaiDate(reportRange.start)} – ${formatThaiDate(reportRange.end)}`;
+  const topMenuRange = getReportDateRange(todayKey(), topMenuMode, "", "");
+  const topSellingMenus = getTopSellingMenus(sales, topMenuRange.start, topMenuRange.end);
 
   return (
     <section className="closing-panel closing-report">
       <div className="detail-section__title">
         <h3>ภาพรวมยอดขาย</h3>
-        <div className="report-toggle">
-          <button className={mode === "week" ? "is-active" : ""} onClick={() => setMode("week")} type="button">7 วัน</button>
-          <button className={mode === "month" ? "is-active" : ""} onClick={() => setMode("month")} type="button">เดือนนี้</button>
-          <button className={mode === "custom" ? "is-active" : ""} onClick={() => setMode("custom")} type="button">กำหนดเอง</button>
+        <div className="report-controls">
+          <div className="report-toggle">
+            <button className={mode === "week" ? "is-active" : ""} onClick={() => setMode("week")} type="button">7 วัน</button>
+            <button className={mode === "month" ? "is-active" : ""} onClick={() => setMode("month")} type="button">เดือนนี้</button>
+            <button className={mode === "custom" ? "is-active" : ""} onClick={() => setMode("custom")} type="button">กำหนดเอง</button>
+          </div>
+          <button className="report-stats-button" onClick={() => setTopMenuOpen(true)} type="button">
+            <BarChart3 size={15} />
+            สถิติ
+          </button>
         </div>
       </div>
       {mode === "custom" ? (
@@ -2259,6 +2281,38 @@ function ClosingReport({
         })}
         {!rangeHistory.length ? <p className="empty-text">ยังไม่มีประวัติการขายในช่วงนี้</p> : null}
       </div>
+      {topMenuOpen ? (
+        <div className="top-menu-sheet-layer">
+          <button aria-label="ปิดสถิติเมนูขายดี" className="top-menu-sheet-backdrop" onClick={() => setTopMenuOpen(false)} type="button" />
+          <section aria-labelledby="top-menu-sheet-title" aria-modal="true" className="top-menu-sheet" role="dialog">
+            <div className="top-menu-sheet__handle" />
+            <div className="top-menu-sheet__header">
+              <div>
+                <h3 id="top-menu-sheet-title">เมนูขายดี</h3>
+                <span>{topMenuMode === "week" ? "7 วันล่าสุด" : "เดือนนี้"}</span>
+              </div>
+              <button aria-label="ปิด" autoFocus onClick={() => setTopMenuOpen(false)} type="button"><X size={20} /></button>
+            </div>
+            <div className="top-menu-sheet__toggle">
+              <button className={topMenuMode === "week" ? "is-active" : ""} onClick={() => setTopMenuMode("week")} type="button">7 วันล่าสุด</button>
+              <button className={topMenuMode === "month" ? "is-active" : ""} onClick={() => setTopMenuMode("month")} type="button">เดือนนี้</button>
+            </div>
+            <div className="top-menu-list">
+              {topSellingMenus.map((menu, index) => (
+                <div className="top-menu-row" key={menu.itemId}>
+                  <strong className={`top-menu-rank top-menu-rank--${index + 1}`}>{index + 1}</strong>
+                  <span>
+                    <strong>{menu.name}</strong>
+                    <small>ยอดขาย {money(menu.revenue)} บาท</small>
+                  </span>
+                  <strong>{menu.quantity} รายการ</strong>
+                </div>
+              ))}
+              {!topSellingMenus.length ? <p className="empty-text">ยังไม่มียอดขายในช่วงนี้</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -3317,6 +3371,26 @@ function todayKey() {
 function getSalesReportRows(sales: Sale[], startDate: string, endDate: string) {
   const dates = Array.from(new Set(sales.filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate).map((sale) => sale.saleDate)));
   return dates.sort().map((date) => summarizeSales(sales, date));
+}
+
+function getTopSellingMenus(sales: Sale[], startDate: string, endDate: string): TopSellingMenu[] {
+  const menus = new Map<string, TopSellingMenu>();
+  sales
+    .filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate)
+    .forEach((sale) => {
+      sale.items
+        .filter((item) => item.kind !== "topping" && !item.parentId)
+        .forEach((item) => {
+          const key = item.itemId || item.name;
+          const current = menus.get(key) || { itemId: key, name: item.name, quantity: 0, revenue: 0 };
+          current.quantity += item.qty;
+          current.revenue += item.lineRevenue;
+          menus.set(key, current);
+        });
+    });
+  return Array.from(menus.values())
+    .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue || a.name.localeCompare(b.name, "th"))
+    .slice(0, 5);
 }
 
 function getReportDateRange(referenceDate: string, mode: ClosingReportMode, customStart: string, customEnd: string): ReportDateRange {
