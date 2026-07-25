@@ -78,6 +78,8 @@ type OrderItem = {
   note: string;
   addons: OrderAddon[];
 };
+type PaymentMethod = "" | "เงินสด" | "E-Payment" | "ธนาคาร" | "พร้อมเพย์";
+const paymentMethods: Exclude<PaymentMethod, "">[] = ["เงินสด", "E-Payment", "ธนาคาร", "พร้อมเพย์"];
 type SaleDraftItem = {
   id: string;
   parentId?: string;
@@ -161,6 +163,7 @@ function App() {
   const [orderNote, setOrderNote] = useState("");
   const [orderPromotionName, setOrderPromotionName] = useState("");
   const [orderPromotionAmount, setOrderPromotionAmount] = useState(0);
+  const [orderPaymentMethod, setOrderPaymentMethod] = useState<PaymentMethod>("");
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
@@ -754,6 +757,10 @@ function App() {
       setMessage("เพิ่มเมนูในออเดอร์ก่อนสร้างบิล");
       return;
     }
+    if (!orderPaymentMethod) {
+      setMessage("เลือกวิธีชำระเงินก่อนสร้างบิล");
+      return;
+    }
     setMessage("");
     if (!orderNumber.trim()) setOrderNumber(makeOrderNumber());
     setOrderPrintedAt(new Date());
@@ -1093,6 +1100,7 @@ function App() {
                   items={orderItems}
                   note={orderNote}
                   orderNumber={orderNumber}
+                  paymentMethod={orderPaymentMethod}
                   promotionAmount={orderPromotionAmount}
                   promotionName={orderPromotionName}
                   recipes={recipes}
@@ -1104,12 +1112,14 @@ function App() {
                   onChannel={setOrderChannel}
                   onClear={() => {
                     setOrderItems([]);
+                    setOrderPaymentMethod("");
                     setOrderPromotionName("");
                     setOrderPromotionAmount(0);
                   }}
                   onCustomerName={setOrderCustomerName}
                   onNote={setOrderNote}
                   onOrderNumber={setOrderNumber}
+                  onPaymentMethod={setOrderPaymentMethod}
                   onPromotionAmount={setOrderPromotionAmount}
                   onPromotionName={setOrderPromotionName}
                   onPrint={printOrderReceipt}
@@ -1201,6 +1211,7 @@ function App() {
               items={orderItems}
               isGeneratingPdf={generatingReceiptPdf}
               note={orderNote}
+              paymentMethod={orderPaymentMethod}
               promotionAmount={orderDiscount}
               promotionName={orderPromotionName}
               onClose={() => setReceiptPreviewOpen(false)}
@@ -1465,6 +1476,7 @@ function OrderScreen({
   items,
   note,
   orderNumber,
+  paymentMethod,
   promotionAmount,
   promotionName,
   recipes,
@@ -1478,6 +1490,7 @@ function OrderScreen({
   onCustomerName,
   onNote,
   onOrderNumber,
+  onPaymentMethod,
   onPromotionAmount,
   onPromotionName,
   onPrint,
@@ -1493,6 +1506,7 @@ function OrderScreen({
   items: OrderItem[];
   note: string;
   orderNumber: string;
+  paymentMethod: PaymentMethod;
   promotionAmount: number;
   promotionName: string;
   recipes: Recipe[];
@@ -1506,6 +1520,7 @@ function OrderScreen({
   onCustomerName: (name: string) => void;
   onNote: (note: string) => void;
   onOrderNumber: (value: string) => void;
+  onPaymentMethod: (value: PaymentMethod) => void;
   onPromotionAmount: (value: number) => void;
   onPromotionName: (value: string) => void;
   onPrint: () => void;
@@ -1673,14 +1688,22 @@ function OrderScreen({
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ลูกค้าขอรับเร็ว แยกถุง" value={note} />
       </label>
 
+      <label className="order-payment-field">
+        วิธีชำระเงิน
+        <select onChange={(event) => onPaymentMethod(event.currentTarget.value as PaymentMethod)} value={paymentMethod}>
+          <option value="">เลือกวิธีชำระเงิน</option>
+          {paymentMethods.map((method) => (
+            <option key={method} value={method}>{method}</option>
+          ))}
+        </select>
+      </label>
+
       <section className="order-summary order-summary--stacked">
+        <div><span>รวมเป็นเงิน</span><strong>{money(grossTotal)} บาท</strong></div>
         {promotionAmount > 0 ? (
-          <>
-            <div><span>ยอดก่อนลด</span><strong>{money(grossTotal)} บาท</strong></div>
-            <div className="is-discount"><span>{promotionName.trim() || "โปรโมชั่น"}</span><strong>-{money(clampPromotionAmount(promotionAmount, grossTotal))} บาท</strong></div>
-          </>
+          <div className="is-discount"><span>{promotionName.trim() || "ส่วนลดร้านค้า"}</span><strong>-{money(clampPromotionAmount(promotionAmount, grossTotal))} บาท</strong></div>
         ) : null}
-        <div className="is-total"><span>ยอดสุทธิ</span><strong>{money(total)} บาท</strong></div>
+        <div className="is-total"><span>ยอดรวมสุทธิ</span><strong>{money(total)} บาท</strong></div>
       </section>
       <button className="submit-button" onClick={onPrint} type="button">สร้างบิล</button>
     </>
@@ -2324,6 +2347,7 @@ function OrderReceipt({
   isGeneratingPdf,
   items,
   note,
+  paymentMethod,
   promotionAmount,
   promotionName,
   onClose,
@@ -2344,6 +2368,7 @@ function OrderReceipt({
   isGeneratingPdf: boolean;
   items: OrderItem[];
   note: string;
+  paymentMethod: PaymentMethod;
   promotionAmount: number;
   promotionName: string;
   onClose: () => void;
@@ -2526,14 +2551,14 @@ function OrderReceipt({
             </div>
           ))}
         </section>
-        <div className="receipt-divider" />
-        {promotionAmount > 0 ? (
-          <div className="receipt-adjustments">
-            <div><span>ยอดก่อนลด</span><strong>{money(grossTotal)} บาท</strong></div>
-            <div><span>{promotionName.trim() || "โปรโมชั่น"}</span><strong>-{money(promotionAmount)} บาท</strong></div>
-          </div>
-        ) : null}
-        <div className="receipt-total"><span>ยอดสุทธิ</span><strong>{money(total)} บาท</strong></div>
+        <div className="receipt-payment-summary">
+          <div><span>วิธีชำระเงิน</span><strong>{paymentMethod}</strong></div>
+          <div><span>รวมเป็นเงิน</span><strong>{money(grossTotal)}</strong></div>
+          {promotionAmount > 0 ? (
+            <div><span>{promotionName.trim() || "ส่วนลดร้านค้า"}</span><strong>-{money(promotionAmount)}</strong></div>
+          ) : null}
+          <div className="receipt-net-total"><span>ยอดรวมสุทธิ</span><strong>{money(total)}</strong></div>
+        </div>
         {note ? (
           <>
             <div className="receipt-divider" />

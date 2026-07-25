@@ -1589,6 +1589,23 @@ p {
   resize: vertical;
 }
 
+.order-payment-field {
+  margin: 12px 0;
+  padding: 13px;
+  display: grid;
+  gap: 7px;
+}
+
+.order-payment-field select {
+  min-height: 42px;
+  border: 1px solid #dfe6da;
+  border-radius: 9px;
+  padding: 0 11px;
+  background: #fff;
+  color: #17210f;
+  font-weight: 800;
+}
+
 .order-summary {
   padding: 14px 15px;
   margin-bottom: 12px;
@@ -1610,8 +1627,7 @@ p {
   gap: 8px;
 }
 
-.order-summary--stacked > div,
-.receipt-adjustments > div {
+.order-summary--stacked > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1875,18 +1891,24 @@ p {
   font-size: 10px;
 }
 
-.receipt-meta > div,
-.receipt-total {
+.receipt-meta > div {
   display: grid;
   grid-template-columns: 17mm 1fr;
   gap: 2mm;
 }
 
-.receipt-adjustments {
+.receipt-payment-summary {
   display: grid;
-  gap: 3px;
-  padding: 2mm 0;
+  gap: 2mm;
+  border-top: 1px solid #000;
+  padding-top: 2mm;
   font-size: 10px;
+}
+
+.receipt-payment-summary > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2mm;
 }
 
 .receipt-meta span {
@@ -1894,8 +1916,9 @@ p {
 }
 
 .receipt-meta strong,
-.receipt-total strong {
+.receipt-payment-summary strong {
   text-align: right;
+  white-space: nowrap;
 }
 
 .receipt-divider {
@@ -1936,9 +1959,10 @@ p {
   padding-left: 4mm;
 }
 
-.receipt-total {
+.receipt-net-total {
   align-items: end;
-  border-top: 1.5px solid #000;
+  margin-top: 1mm;
+  border-top: 1px solid #000;
   padding-top: 2mm;
   font-size: 15px;
   font-weight: 900;
