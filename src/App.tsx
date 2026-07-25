@@ -1,4 +1,5 @@
 import {
+  Banknote,
   BarChart3,
   CheckCircle2,
   ChevronDown,
@@ -11,15 +12,18 @@ import {
   Grid2X2,
   Home,
   KeyRound,
+  Landmark,
   Milk,
   Package,
   Pencil,
   Plus,
   Copy,
   RefreshCw,
+  QrCode,
   Search,
   Settings2,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Store,
   Trash2,
@@ -79,7 +83,15 @@ type OrderItem = {
   addons: OrderAddon[];
 };
 type PaymentMethod = "" | "เงินสด" | "E-Payment" | "ธนาคาร" | "พร้อมเพย์";
-const paymentMethods: Exclude<PaymentMethod, "">[] = ["เงินสด", "E-Payment", "ธนาคาร", "พร้อมเพย์"];
+const paymentMethodOptions: Array<{
+  icon: ElementType;
+  value: Exclude<PaymentMethod, "">;
+}> = [
+  { icon: Banknote, value: "เงินสด" },
+  { icon: Smartphone, value: "E-Payment" },
+  { icon: Landmark, value: "ธนาคาร" },
+  { icon: QrCode, value: "พร้อมเพย์" }
+];
 type SaleDraftItem = {
   id: string;
   parentId?: string;
@@ -1530,6 +1542,7 @@ function OrderScreen({
   onUpdateAddon: (itemId: string, addonId: string, patch: Partial<OrderAddon>) => void;
   onUpdateItem: (itemId: string, patch: Partial<OrderItem>) => void;
 }) {
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
   const normalizedOrderSearch = searchQuery.trim().toLowerCase();
   const visibleRecipes = recipes
     .filter((recipe) => recipe.name.toLowerCase().includes(normalizedOrderSearch))
@@ -1688,15 +1701,20 @@ function OrderScreen({
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ลูกค้าขอรับเร็ว แยกถุง" value={note} />
       </label>
 
-      <label className="order-payment-field">
-        วิธีชำระเงิน
-        <select onChange={(event) => onPaymentMethod(event.currentTarget.value as PaymentMethod)} value={paymentMethod}>
-          <option value="">เลือกวิธีชำระเงิน</option>
-          {paymentMethods.map((method) => (
-            <option key={method} value={method}>{method}</option>
-          ))}
-        </select>
-      </label>
+      <div className="order-payment-field">
+        <span className="order-payment-label">วิธีชำระเงิน</span>
+        <button
+          aria-expanded={paymentSheetOpen}
+          aria-haspopup="dialog"
+          className={`payment-selector${paymentMethod ? " is-selected" : ""}`}
+          onClick={() => setPaymentSheetOpen(true)}
+          type="button"
+        >
+          <span className="payment-selector__icon"><WalletCards size={20} /></span>
+          <strong>{paymentMethod || "เลือกวิธีชำระเงิน"}</strong>
+          <ChevronRight size={18} />
+        </button>
+      </div>
 
       <section className="order-summary order-summary--stacked">
         <div><span>รวมทั้งหมด</span><strong>{money(grossTotal)} บาท</strong></div>
@@ -1706,6 +1724,42 @@ function OrderScreen({
         <div className="is-total"><span>ยอดรวมสุทธิ</span><strong>{money(total)} บาท</strong></div>
       </section>
       <button className="submit-button" onClick={onPrint} type="button">สร้างบิล</button>
+      {paymentSheetOpen ? (
+        <div className="top-menu-sheet-layer">
+          <button aria-label="ปิดตัวเลือกวิธีชำระเงิน" className="top-menu-sheet-backdrop" onClick={() => setPaymentSheetOpen(false)} type="button" />
+          <section aria-labelledby="payment-sheet-title" aria-modal="true" className="top-menu-sheet payment-method-sheet" role="dialog">
+            <div className="top-menu-sheet__handle" />
+            <div className="top-menu-sheet__header">
+              <div>
+                <h3 id="payment-sheet-title">วิธีชำระเงิน</h3>
+                <span>เลือกสำหรับบิลนี้</span>
+              </div>
+              <button aria-label="ปิด" autoFocus onClick={() => setPaymentSheetOpen(false)} type="button"><X size={20} /></button>
+            </div>
+            <div className="payment-method-grid">
+              {paymentMethodOptions.map(({ icon: Icon, value }) => {
+                const selected = paymentMethod === value;
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`payment-method-option${selected ? " is-selected" : ""}`}
+                    key={value}
+                    onClick={() => {
+                      onPaymentMethod(value);
+                      setPaymentSheetOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <span className="payment-method-option__icon"><Icon size={20} /></span>
+                    <strong>{value}</strong>
+                    {selected ? <CheckCircle2 size={18} /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </>
   );
 }
