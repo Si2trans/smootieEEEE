@@ -1699,7 +1699,7 @@ function OrderScreen({
       </label>
 
       <section className="order-summary order-summary--stacked">
-        <div><span>รวมเป็นเงิน</span><strong>{money(grossTotal)} บาท</strong></div>
+        <div><span>รวมทั้งหมด</span><strong>{money(grossTotal)} บาท</strong></div>
         {promotionAmount > 0 ? (
           <div className="is-discount"><span>{promotionName.trim() || "ส่วนลดร้านค้า"}</span><strong>-{money(clampPromotionAmount(promotionAmount, grossTotal))} บาท</strong></div>
         ) : null}
@@ -2553,7 +2553,7 @@ function OrderReceipt({
         </section>
         <div className="receipt-payment-summary">
           <div><span>วิธีชำระเงิน</span><strong>{paymentMethod}</strong></div>
-          <div><span>รวมเป็นเงิน</span><strong>{money(grossTotal)}</strong></div>
+          <div><span>รวมทั้งหมด</span><strong>{money(grossTotal)}</strong></div>
           {promotionAmount > 0 ? (
             <div><span>{promotionName.trim() || "ส่วนลดร้านค้า"}</span><strong>-{money(promotionAmount)}</strong></div>
           ) : null}
