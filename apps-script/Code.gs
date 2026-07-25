@@ -164,7 +164,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.sales,
-      headers: ["id", "sale_date", "channel", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
+      headers: ["id", "sale_date", "channel", "payment_method", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
       rows: []
     },
     {
@@ -553,6 +553,7 @@ function saveSale(payload) {
   sale.id = cleanId(sale.id);
   sale.sale_date = cleanId(sale.sale_date);
   sale.channel = cleanId(sale.channel) || "หน้าร้าน";
+  sale.payment_method = normalizePaymentMethod(sale.payment_method);
   sale.promotion_name = cleanId(sale.promotion_name || "");
   sale.promotion_amount = Number(sale.promotion_amount || 0);
   if (!isFinite(sale.promotion_amount)) sale.promotion_amount = 0;
@@ -598,6 +599,11 @@ function saveSale(payload) {
 
 function isDeliveryChannel(channel) {
   return ["LINE MAN", "Grab", "ShopeeFood"].indexOf(cleanId(channel)) >= 0;
+}
+
+function normalizePaymentMethod(value) {
+  value = cleanId(value);
+  return ["เงินสด", "E-Payment", "ธนาคาร", "พร้อมเพย์"].indexOf(value) >= 0 ? value : "";
 }
 
 function roundCurrency(value) {

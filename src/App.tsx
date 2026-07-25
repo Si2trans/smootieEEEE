@@ -59,7 +59,7 @@ import {
 import type { SyncState } from "./lib/syncQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
 import { calculateSaleRevenue } from "./lib/sales";
-import type { Category, CategoryId, DailyClosing, Ingredient, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
@@ -82,10 +82,10 @@ type OrderItem = {
   note: string;
   addons: OrderAddon[];
 };
-type PaymentMethod = "" | "เงินสด" | "E-Payment" | "ธนาคาร" | "พร้อมเพย์";
+type PaymentMethodSelection = PaymentMethod | "";
 const paymentMethodOptions: Array<{
   icon: ElementType;
-  value: Exclude<PaymentMethod, "">;
+  value: PaymentMethod;
 }> = [
   { icon: Banknote, value: "เงินสด" },
   { icon: Smartphone, value: "E-Payment" },
@@ -110,6 +110,9 @@ type SalesSummary = {
   revenue: number;
   cost: number;
   profit: number;
+  cashRevenue: number;
+  transferRevenue: number;
+  unassignedRevenue: number;
 };
 type ClosingReportMode = "week" | "month" | "custom";
 type ReportDateRange = { start: string; end: string };
@@ -175,13 +178,14 @@ function App() {
   const [orderNote, setOrderNote] = useState("");
   const [orderPromotionName, setOrderPromotionName] = useState("");
   const [orderPromotionAmount, setOrderPromotionAmount] = useState(0);
-  const [orderPaymentMethod, setOrderPaymentMethod] = useState<PaymentMethod>("");
+  const [orderPaymentMethod, setOrderPaymentMethod] = useState<PaymentMethodSelection>("");
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
   const [sales, setSales] = useState<Sale[]>(cachedData?.sales || []);
   const [dailyClosings, setDailyClosings] = useState<DailyClosing[]>(cachedData?.dailyClosings || []);
   const [saleChannel, setSaleChannel] = useState("หน้าร้าน");
+  const [salePaymentMethod, setSalePaymentMethod] = useState<PaymentMethodSelection>("");
   const [saleDate, setSaleDate] = useState(() => todayKey());
   const [saleSearch, setSaleSearch] = useState("");
   const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([]);
@@ -614,6 +618,7 @@ function App() {
   function resetSaleEditor() {
     setSaleItems([]);
     setSaleNote("");
+    setSalePaymentMethod("");
     setSalePromotionName("");
     setSalePromotionAmount(0);
     setEditingSaleId(null);
@@ -637,6 +642,7 @@ function App() {
     );
     setSaleDate(sale.saleDate);
     setSaleChannel(sale.channel);
+    setSalePaymentMethod(sale.paymentMethod || "");
     setSaleNote(sale.note || "");
     setSalePromotionName(sale.promotionName || "");
     setSalePromotionAmount(sale.promotionAmount || 0);
@@ -677,6 +683,10 @@ function App() {
       setMessage("เพิ่มรายการขายก่อนบันทึก");
       return;
     }
+    if (!salePaymentMethod) {
+      setMessage("เลือกวิธีชำระเงินก่อนบันทึกยอดขาย");
+      return;
+    }
     setSaving(true);
     setMessage("");
     try {
@@ -709,6 +719,7 @@ function App() {
         id: saleId,
         saleDate: saleDate || todayKey(),
         channel: saleChannel,
+        paymentMethod: salePaymentMethod,
         grossRevenue: saleTotals.grossRevenue,
         promotionName: saleTotals.promotionAmount > 0 ? salePromotionName.trim() : "",
         promotionAmount: saleTotals.promotionAmount,
@@ -1150,6 +1161,7 @@ function App() {
                   ingredients={ingredientList}
                   items={saleItems}
                   note={saleNote}
+                  paymentMethod={salePaymentMethod}
                   promotionAmount={salePromotionAmount}
                   promotionName={salePromotionName}
                   recipes={recipes}
@@ -1168,6 +1180,7 @@ function App() {
                   onDate={setSaleDate}
                   onNote={setSaleNote}
                   onEditSale={editSale}
+                  onPaymentMethod={setSalePaymentMethod}
                   onPromotionAmount={setSalePromotionAmount}
                   onPromotionName={setSalePromotionName}
                   onRemoveItem={removeSaleItem}
@@ -1518,7 +1531,7 @@ function OrderScreen({
   items: OrderItem[];
   note: string;
   orderNumber: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: PaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
   recipes: Recipe[];
@@ -1532,7 +1545,7 @@ function OrderScreen({
   onCustomerName: (name: string) => void;
   onNote: (note: string) => void;
   onOrderNumber: (value: string) => void;
-  onPaymentMethod: (value: PaymentMethod) => void;
+  onPaymentMethod: (value: PaymentMethodSelection) => void;
   onPromotionAmount: (value: number) => void;
   onPromotionName: (value: string) => void;
   onPrint: () => void;
@@ -1542,7 +1555,6 @@ function OrderScreen({
   onUpdateAddon: (itemId: string, addonId: string, patch: Partial<OrderAddon>) => void;
   onUpdateItem: (itemId: string, patch: Partial<OrderItem>) => void;
 }) {
-  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
   const normalizedOrderSearch = searchQuery.trim().toLowerCase();
   const visibleRecipes = recipes
     .filter((recipe) => recipe.name.toLowerCase().includes(normalizedOrderSearch))
@@ -1701,20 +1713,7 @@ function OrderScreen({
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ลูกค้าขอรับเร็ว แยกถุง" value={note} />
       </label>
 
-      <div className="order-payment-field">
-        <span className="order-payment-label">วิธีชำระเงิน</span>
-        <button
-          aria-expanded={paymentSheetOpen}
-          aria-haspopup="dialog"
-          className={`payment-selector${paymentMethod ? " is-selected" : ""}`}
-          onClick={() => setPaymentSheetOpen(true)}
-          type="button"
-        >
-          <span className="payment-selector__icon"><WalletCards size={20} /></span>
-          <strong>{paymentMethod || "เลือกวิธีชำระเงิน"}</strong>
-          <ChevronRight size={18} />
-        </button>
-      </div>
+      <PaymentMethodField onChange={onPaymentMethod} value={paymentMethod} />
 
       <section className="order-summary order-summary--stacked">
         <div><span>รวมทั้งหมด</span><strong>{money(grossTotal)} บาท</strong></div>
@@ -1724,34 +1723,63 @@ function OrderScreen({
         <div className="is-total"><span>ยอดรวมสุทธิ</span><strong>{money(total)} บาท</strong></div>
       </section>
       <button className="submit-button" onClick={onPrint} type="button">สร้างบิล</button>
-      {paymentSheetOpen ? (
+    </>
+  );
+}
+
+function PaymentMethodField({
+  onChange,
+  value
+}: {
+  onChange: (value: PaymentMethodSelection) => void;
+  value: PaymentMethodSelection;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <div className="order-payment-field">
+        <span className="order-payment-label">วิธีชำระเงิน</span>
+        <button
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          className={`payment-selector${value ? " is-selected" : ""}`}
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          <span className="payment-selector__icon"><WalletCards size={20} /></span>
+          <strong>{value || "เลือกวิธีชำระเงิน"}</strong>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+      {open ? (
         <div className="top-menu-sheet-layer">
-          <button aria-label="ปิดตัวเลือกวิธีชำระเงิน" className="top-menu-sheet-backdrop" onClick={() => setPaymentSheetOpen(false)} type="button" />
+          <button aria-label="ปิดตัวเลือกวิธีชำระเงิน" className="top-menu-sheet-backdrop" onClick={() => setOpen(false)} type="button" />
           <section aria-labelledby="payment-sheet-title" aria-modal="true" className="top-menu-sheet payment-method-sheet" role="dialog">
             <div className="top-menu-sheet__handle" />
             <div className="top-menu-sheet__header">
               <div>
                 <h3 id="payment-sheet-title">วิธีชำระเงิน</h3>
-                <span>เลือกสำหรับบิลนี้</span>
+                <span>เลือกสำหรับรายการนี้</span>
               </div>
-              <button aria-label="ปิด" autoFocus onClick={() => setPaymentSheetOpen(false)} type="button"><X size={20} /></button>
+              <button aria-label="ปิด" autoFocus onClick={() => setOpen(false)} type="button"><X size={20} /></button>
             </div>
             <div className="payment-method-grid">
-              {paymentMethodOptions.map(({ icon: Icon, value }) => {
-                const selected = paymentMethod === value;
+              {paymentMethodOptions.map(({ icon: Icon, value: optionValue }) => {
+                const selected = value === optionValue;
                 return (
                   <button
                     aria-pressed={selected}
                     className={`payment-method-option${selected ? " is-selected" : ""}`}
-                    key={value}
+                    key={optionValue}
                     onClick={() => {
-                      onPaymentMethod(value);
-                      setPaymentSheetOpen(false);
+                      onChange(optionValue);
+                      setOpen(false);
                     }}
                     type="button"
                   >
                     <span className="payment-method-option__icon"><Icon size={20} /></span>
-                    <strong>{value}</strong>
+                    <strong>{optionValue}</strong>
                     {selected ? <CheckCircle2 size={18} /> : null}
                   </button>
                 );
@@ -1831,6 +1859,7 @@ function SalesScreen({
   ingredients,
   items,
   note,
+  paymentMethod,
   promotionAmount,
   promotionName,
   recipes,
@@ -1849,6 +1878,7 @@ function SalesScreen({
   onDate,
   onNote,
   onEditSale,
+  onPaymentMethod,
   onPromotionAmount,
   onPromotionName,
   onRemoveItem,
@@ -1863,6 +1893,7 @@ function SalesScreen({
   ingredients: Ingredient[];
   items: SaleDraftItem[];
   note: string;
+  paymentMethod: PaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
   recipes: Recipe[];
@@ -1881,6 +1912,7 @@ function SalesScreen({
   onDate: (date: string) => void;
   onNote: (note: string) => void;
   onEditSale: (sale: Sale) => void;
+  onPaymentMethod: (value: PaymentMethodSelection) => void;
   onPromotionAmount: (value: number) => void;
   onPromotionName: (value: string) => void;
   onRemoveItem: (itemId: string) => void;
@@ -2032,6 +2064,8 @@ function SalesScreen({
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ยอดจากสมุด หรือขายนอกรอบ" value={note} />
       </label>
 
+      <PaymentMethodField onChange={onPaymentMethod} value={paymentMethod} />
+
       <section className="sales-summary-card">
         {totals.promotionAmount > 0 ? (
           <div>
@@ -2091,6 +2125,20 @@ function SalesScreen({
             <strong>{money(summary.revenue)} บาท</strong>
           </div>
           <div>
+            <span>รับเงินสด</span>
+            <strong>{money(summary.cashRevenue)} บาท</strong>
+          </div>
+          <div>
+            <span>รับเงินโอน</span>
+            <strong>{money(summary.transferRevenue)} บาท</strong>
+          </div>
+          {summary.unassignedRevenue > 0 ? (
+            <div className="is-unassigned">
+              <span>ไม่ระบุวิธีชำระ</span>
+              <strong>{money(summary.unassignedRevenue)} บาท</strong>
+            </div>
+          ) : null}
+          <div>
             <span>ต้นทุนรวม</span>
             <strong>{money(summary.cost)} บาท</strong>
           </div>
@@ -2142,7 +2190,7 @@ function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) =
       <summary>
         <span>
           <strong>{formatSaleTime(sale.createdAt)}</strong>
-          <small>{sale.channel} · {itemCount} เมนู</small>
+          <small>{sale.channel} · {sale.paymentMethod || "ไม่ระบุวิธีชำระ"} · {itemCount} เมนู</small>
         </span>
         <span>
           <strong>{money(sale.totalRevenue)} บาท</strong>
@@ -2218,9 +2266,12 @@ function ClosingReport({
     (sum, row) => ({
       revenue: sum.revenue + row.revenue,
       cost: sum.cost + row.cost,
-      profit: sum.profit + row.profit
+      profit: sum.profit + row.profit,
+      cashRevenue: sum.cashRevenue + row.cashRevenue,
+      transferRevenue: sum.transferRevenue + row.transferRevenue,
+      unassignedRevenue: sum.unassignedRevenue + row.unassignedRevenue
     }),
-    { revenue: 0, cost: 0, profit: 0 }
+    { revenue: 0, cost: 0, profit: 0, cashRevenue: 0, transferRevenue: 0, unassignedRevenue: 0 }
   );
   const maxMetric = Math.max(1, totals.revenue, totals.cost, Math.max(0, totals.profit));
   const positiveCost = Math.max(0, totals.cost);
@@ -2291,6 +2342,20 @@ function ClosingReport({
           <strong>{money(totals.revenue)} บาท</strong>
         </div>
         <div>
+          <span>รับเงินสด</span>
+          <strong>{money(totals.cashRevenue)} บาท</strong>
+        </div>
+        <div>
+          <span>รับเงินโอน</span>
+          <strong>{money(totals.transferRevenue)} บาท</strong>
+        </div>
+        {totals.unassignedRevenue > 0 ? (
+          <div className="is-unassigned">
+            <span>ไม่ระบุวิธีชำระ</span>
+            <strong>{money(totals.unassignedRevenue)} บาท</strong>
+          </div>
+        ) : null}
+        <div>
           <span>ต้นทุนรวม</span>
           <strong>{money(totals.cost)} บาท</strong>
         </div>
@@ -2348,6 +2413,13 @@ function ClosingReport({
                   <span><small>รายรับ</small><strong>{money(daySummary.revenue)}</strong></span>
                   <span><small>ต้นทุน</small><strong>{money(daySummary.cost)}</strong></span>
                   <span><small>กำไร</small><strong>{money(daySummary.profit)}</strong></span>
+                </div>
+                <div className="day-history-payments">
+                  <span><small>เงินสด</small><strong>{money(daySummary.cashRevenue)}</strong></span>
+                  <span><small>เงินโอน</small><strong>{money(daySummary.transferRevenue)}</strong></span>
+                  {daySummary.unassignedRevenue > 0 ? (
+                    <span className="is-unassigned"><small>ไม่ระบุ</small><strong>{money(daySummary.unassignedRevenue)}</strong></span>
+                  ) : null}
                 </div>
               </summary>
               <div className="day-history-entry__body">
@@ -2422,7 +2494,7 @@ function OrderReceipt({
   isGeneratingPdf: boolean;
   items: OrderItem[];
   note: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: PaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
   onClose: () => void;
@@ -3521,17 +3593,36 @@ function formatSaleTime(value: string) {
 function summarizeSales(sales: Sale[], date: string): SalesSummary {
   return sales
     .filter((sale) => sale.saleDate === date)
-    .reduce(
-      (summary, sale) => ({
+    .reduce((summary, sale) => {
+      const paymentBucket = salePaymentBucket(sale.paymentMethod);
+      return {
         date,
         orderCount: summary.orderCount + 1,
         itemCount: summary.itemCount + sale.items.filter((item) => item.kind !== "topping" && !item.parentId).reduce((sum, item) => sum + item.qty, 0),
         revenue: summary.revenue + sale.totalRevenue,
         cost: summary.cost + sale.totalCost,
-        profit: summary.profit + sale.totalProfit
-      }),
-      { date, orderCount: 0, itemCount: 0, revenue: 0, cost: 0, profit: 0 }
-    );
+        profit: summary.profit + sale.totalProfit,
+        cashRevenue: summary.cashRevenue + (paymentBucket === "cash" ? sale.totalRevenue : 0),
+        transferRevenue: summary.transferRevenue + (paymentBucket === "transfer" ? sale.totalRevenue : 0),
+        unassignedRevenue: summary.unassignedRevenue + (paymentBucket === "unassigned" ? sale.totalRevenue : 0)
+      };
+    }, {
+      date,
+      orderCount: 0,
+      itemCount: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+      cashRevenue: 0,
+      transferRevenue: 0,
+      unassignedRevenue: 0
+    });
+}
+
+function salePaymentBucket(paymentMethod?: PaymentMethod) {
+  if (paymentMethod === "เงินสด") return "cash";
+  if (paymentMethod === "E-Payment" || paymentMethod === "ธนาคาร" || paymentMethod === "พร้อมเพย์") return "transfer";
+  return "unassigned";
 }
 
 function sanitizeFileName(value: string) {

@@ -59,6 +59,7 @@ export type CostBreakdown = {
 };
 
 export type SaleItemKind = "recipe" | "topping" | "custom";
+export type PaymentMethod = "เงินสด" | "E-Payment" | "ธนาคาร" | "พร้อมเพย์";
 
 export type SaleItem = {
   id: string;
@@ -80,6 +81,7 @@ export type Sale = {
   id: string;
   saleDate: string;
   channel: string;
+  paymentMethod?: PaymentMethod;
   grossRevenue: number;
   promotionName?: string;
   promotionAmount: number;

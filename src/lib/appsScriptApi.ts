@@ -1,4 +1,4 @@
-import type { Category, CategoryId, DailyClosing, Ingredient, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
 import { calculateSaleRevenue } from "./sales";
 
 const DEFAULT_APPS_SCRIPT_URL =
@@ -164,6 +164,7 @@ export async function saveSale(input: SaveSaleInput) {
       id: input.id || `sale_${Date.now()}`,
       sale_date: input.saleDate,
       channel: input.channel,
+      payment_method: input.paymentMethod || "",
       gross_revenue: grossRevenue,
       promotion_name: input.promotionName || "",
       promotion_amount: revenue.promotionAmount,
@@ -406,6 +407,7 @@ function normalizeSales(saleRows: Array<Record<string, unknown>>, itemRows: Arra
         id,
         saleDate: businessDateKey(row.sale_date || row.saleDate),
         channel: text(row.channel) || "หน้าร้าน",
+        paymentMethod: paymentMethod(row.payment_method || row.paymentMethod),
         grossRevenue: number(row.gross_revenue || row.grossRevenue, totalRevenue + promotionAmount),
         promotionName: text(row.promotion_name || row.promotionName),
         promotionAmount,
@@ -556,6 +558,11 @@ function unit(value: unknown): Unit {
 function saleItemKind(value: unknown): SaleItemKind {
   const normalized = text(value) as SaleItemKind;
   return ["recipe", "topping", "custom"].includes(normalized) ? normalized : "custom";
+}
+
+function paymentMethod(value: unknown): PaymentMethod | undefined {
+  const normalized = text(value) as PaymentMethod;
+  return ["เงินสด", "E-Payment", "ธนาคาร", "พร้อมเพย์"].includes(normalized) ? normalized : undefined;
 }
 
 function normalizeAppDataDates(data: AppData): AppData {

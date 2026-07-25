@@ -2452,6 +2452,14 @@ p {
   font-size: 16px;
 }
 
+.sales-summary-card .is-unassigned {
+  background: #fff8e8;
+}
+
+.sales-summary-card .is-unassigned strong {
+  color: #9a6700;
+}
+
 .sales-summary-card--closing {
   grid-template-columns: 1fr 1fr;
 }
@@ -2821,6 +2829,45 @@ p {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.day-history-payments {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 6px;
+}
+
+.day-history-payments > span {
+  min-width: 0;
+  border-radius: 8px;
+  padding: 6px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: #eef8e9;
+}
+
+.day-history-payments small {
+  color: #56704a;
+  font-size: 10px;
+}
+
+.day-history-payments strong {
+  overflow: hidden;
+  color: var(--green);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-history-payments .is-unassigned {
+  background: #fff8e8;
+}
+
+.day-history-payments .is-unassigned strong {
+  color: #9a6700;
 }
 
 .sale-history-entry > summary::-webkit-details-marker,
