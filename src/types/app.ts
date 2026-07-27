@@ -1,4 +1,4 @@
-export type CategoryId = "all" | "tea" | "milk" | "coffee" | "soda" | "smoothie" | "toast" | "pangyen";
+export type CategoryId = string;
 
 export type Unit = "ml" | "g" | "piece";
 
@@ -7,6 +7,7 @@ export type Category = {
   label: string;
   icon: string;
   color: string;
+  sortOrder: number;
 };
 
 export type Ingredient = {

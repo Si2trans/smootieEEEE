@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ClipboardList,
   Coffee,
   CupSoda,
@@ -131,7 +132,9 @@ type ReceiptPaperSettings = {
   pixelRatio: number;
 };
 
-const iconMap = { Store, CupSoda, Milk, Coffee, GlassWater, Cherry: Sparkles };
+const iconMap: Record<string, ElementType> = { Store, CupSoda, Milk, Coffee, GlassWater, Sparkles, Cherry: Sparkles, Package };
+const categoryIconOptions = ["CupSoda", "Milk", "Coffee", "GlassWater", "Sparkles", "Package", "Store"];
+const categoryColorOptions = ["#f2b634", "#77bfd3", "#8a4f1e", "#f04646", "#6ea4e8", "#d48632", "#3f8f18"];
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
 const units: Unit[] = ["ml", "g", "piece"];
 const receiptPaperStorageKey = "drink-cost-receipt-paper";
@@ -202,6 +205,7 @@ function App() {
   const [pickingCostRecipe, setPickingCostRecipe] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || []);
   const [ingredientList, setIngredientList] = useState<Ingredient[]>(cachedData?.ingredients || []);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -301,6 +305,7 @@ function App() {
 
   function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[] }, selectedId?: string) {
     setCategoryList(data.categories);
+    setSelectedCategory((current) => data.categories.some((category) => category.id === current) ? current : "all");
     setIngredientList(data.ingredients);
     setRecipes(data.recipes);
     setSales(data.sales || []);
@@ -406,6 +411,98 @@ function App() {
       return next;
     });
     setSelectedRecipe(recipe);
+  }
+
+  function applyCategoryChangesLocally(nextCategories: Category[], nextRecipes = recipes) {
+    setCategoryList(nextCategories);
+    setRecipes(nextRecipes);
+    setSelectedRecipe((current) => current ? nextRecipes.find((recipe) => recipe.id === current.id) || nextRecipes[0] || null : nextRecipes[0] || null);
+    cacheAppData({ categories: nextCategories, ingredients: ingredientList, recipes: nextRecipes, sales, dailyClosings });
+  }
+
+  async function saveManagedCategory(category: Category) {
+    const label = category.label.trim();
+    if (!label) throw new Error("ใส่ชื่อหมวดหมู่ก่อนบันทึก");
+    const duplicate = categoryList.some((item) =>
+      item.id !== "all" &&
+      item.id !== category.id &&
+      item.label.trim().toLocaleLowerCase("th") === label.toLocaleLowerCase("th")
+    );
+    if (duplicate) throw new Error("มีชื่อหมวดหมู่นี้แล้ว");
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const managed = categoryList.filter((item) => item.id !== "all");
+      const normalized: Category = {
+        ...category,
+        label,
+        sortOrder: category.sortOrder || managed.length + 1
+      };
+      await enqueueMutation({ action: "saveCategory", entityId: normalized.id, payload: normalized });
+      const nextManaged = managed.some((item) => item.id === normalized.id)
+        ? managed.map((item) => item.id === normalized.id ? normalized : item)
+        : [...managed, normalized];
+      const all = categoryList.find((item) => item.id === "all");
+      const nextCategories = [
+        ...(all ? [all] : []),
+        ...nextManaged.sort((left, right) => left.sortOrder - right.sortOrder)
+      ];
+      applyCategoryChangesLocally(nextCategories);
+      void syncPendingInBackground();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกหมวดหมู่ไม่สำเร็จ");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reorderManagedCategories(orderedCategories: Category[]) {
+    const normalized = orderedCategories.map((category, index) => ({ ...category, sortOrder: index + 1 }));
+    setSaving(true);
+    setMessage("");
+    try {
+      await enqueueMutation({
+        action: "saveCategoryOrder",
+        entityId: "category_order",
+        payload: { categoryIds: normalized.map((category) => category.id) }
+      });
+      const all = categoryList.find((item) => item.id === "all");
+      applyCategoryChangesLocally([...(all ? [all] : []), ...normalized]);
+      void syncPendingInBackground();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "เรียงหมวดหมู่ไม่สำเร็จ");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteManagedCategory(categoryId: CategoryId, replacementCategoryId?: CategoryId) {
+    const usedByRecipes = recipes.some((recipe) => recipe.categoryId === categoryId);
+    if (usedByRecipes && !replacementCategoryId) throw new Error("เลือกหมวดปลายทางสำหรับสูตรเดิม");
+    setSaving(true);
+    setMessage("");
+    try {
+      await enqueueMutation({
+        action: "deleteCategory",
+        entityId: categoryId,
+        payload: { id: categoryId, replacementCategoryId }
+      });
+      const nextCategories = categoryList.filter((category) => category.id !== categoryId);
+      const nextRecipes = replacementCategoryId
+        ? recipes.map((recipe) => recipe.categoryId === categoryId ? { ...recipe, categoryId: replacementCategoryId } : recipe)
+        : recipes;
+      if (selectedCategory === categoryId) setSelectedCategory(replacementCategoryId || "all");
+      applyCategoryChangesLocally(nextCategories, nextRecipes);
+      void syncPendingInBackground();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "ลบหมวดหมู่ไม่สำเร็จ");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
   }
 
   function applyIngredientLocally(ingredient: Ingredient) {
@@ -906,9 +1003,13 @@ function App() {
       const itemUnits = form.getAll("itemUnit").map(String);
       const itemNotes = form.getAll("itemNote").map(String);
       const submittedCategoryId = String(form.get("categoryId") || "");
+      const firstCategoryId = categoryList.find((category) => category.id !== "all")?.id || "";
       const categoryId = categoryList.some((category) => category.id === submittedCategoryId)
         ? (submittedCategoryId as CategoryId)
-        : recipeSource?.categoryId || "tea";
+        : categoryList.some((category) => category.id === recipeSource?.categoryId)
+          ? recipeSource!.categoryId
+          : firstCategoryId;
+      if (!categoryId) throw new Error("เพิ่มหมวดหมู่เครื่องดื่มก่อนบันทึกสูตร");
       const items: RecipeItem[] = itemIngredientIds
         .map((ingredientId, index) => {
           const typedName = itemIngredientNames[index]?.trim().toLowerCase() || "";
@@ -1111,6 +1212,7 @@ function App() {
                   sortMode={sortMode}
                   selectedCategory={selectedCategory}
                   onCategory={setSelectedCategory}
+                  onManageCategories={() => setCategoryManagerOpen(true)}
                   onOpen={openRecipe}
                   onSearch={setSearchQuery}
                   onSort={() => setSortMode((mode) => (mode === "latest" ? "name" : mode === "name" ? "cost" : "latest"))}
@@ -1251,6 +1353,17 @@ function App() {
               grossTotal={orderGrossTotal}
               total={orderTotal}
             />
+            {categoryManagerOpen ? (
+              <CategoryManager
+                categories={categoryList}
+                recipes={recipes}
+                saving={saving}
+                onClose={() => setCategoryManagerOpen(false)}
+                onDelete={deleteManagedCategory}
+                onReorder={reorderManagedCategories}
+                onSave={saveManagedCategory}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -1439,6 +1552,7 @@ function RecipesScreen({
   searchQuery,
   sortMode,
   onOpen,
+  onManageCategories,
   onSearch,
   onSort
 }: {
@@ -1450,6 +1564,7 @@ function RecipesScreen({
   searchQuery: string;
   sortMode: SortMode;
   onOpen: (recipe: Recipe) => void;
+  onManageCategories: () => void;
   onSearch: (query: string) => void;
   onSort: () => void;
 }) {
@@ -1466,6 +1581,12 @@ function RecipesScreen({
           value={searchQuery}
         />
       </label>
+      <div className="category-toolbar">
+        <strong>หมวดหมู่</strong>
+        <button onClick={onManageCategories} type="button">
+          <Settings2 size={16} /> จัดการ
+        </button>
+      </div>
       <div className="category-filter">
         {categories.map((category) => {
           const Icon = iconMap[category.icon as keyof typeof iconMap] ?? Store;
@@ -1491,6 +1612,220 @@ function RecipesScreen({
         ))}
       </div>
     </>
+  );
+}
+
+function CategoryManager({
+  categories,
+  recipes,
+  saving,
+  onClose,
+  onDelete,
+  onReorder,
+  onSave
+}: {
+  categories: Category[];
+  recipes: Recipe[];
+  saving: boolean;
+  onClose: () => void;
+  onDelete: (categoryId: CategoryId, replacementCategoryId?: CategoryId) => Promise<void>;
+  onReorder: (categories: Category[]) => Promise<void>;
+  onSave: (category: Category) => Promise<void>;
+}) {
+  const managedCategories = categories.filter((category) => category.id !== "all");
+  const [draft, setDraft] = useState<Category | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
+  const [replacementCategoryId, setReplacementCategoryId] = useState<CategoryId>("");
+  const [error, setError] = useState("");
+
+  function startAdd() {
+    setDeleteTarget(null);
+    setError("");
+    setDraft({
+      id: makeCategoryId(),
+      label: "",
+      icon: "CupSoda",
+      color: categoryColorOptions[managedCategories.length % categoryColorOptions.length],
+      sortOrder: managedCategories.length + 1
+    });
+  }
+
+  function startEdit(category: Category) {
+    setDeleteTarget(null);
+    setError("");
+    setDraft({ ...category });
+  }
+
+  async function submitCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft) return;
+    setError("");
+    try {
+      await onSave(draft);
+      setDraft(null);
+    } catch (operationError) {
+      setError(operationError instanceof Error ? operationError.message : "บันทึกหมวดหมู่ไม่สำเร็จ");
+    }
+  }
+
+  async function moveCategory(categoryId: CategoryId, direction: -1 | 1) {
+    const index = managedCategories.findIndex((category) => category.id === categoryId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= managedCategories.length) return;
+    const reordered = [...managedCategories];
+    [reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
+    setError("");
+    try {
+      await onReorder(reordered);
+    } catch (operationError) {
+      setError(operationError instanceof Error ? operationError.message : "เรียงหมวดหมู่ไม่สำเร็จ");
+    }
+  }
+
+  function openDelete(category: Category) {
+    const firstReplacement = managedCategories.find((item) => item.id !== category.id)?.id || "";
+    setDraft(null);
+    setError("");
+    setReplacementCategoryId(firstReplacement);
+    setDeleteTarget(category);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setError("");
+    try {
+      await onDelete(deleteTarget.id, replacementCategoryId || undefined);
+      setDeleteTarget(null);
+    } catch (operationError) {
+      setError(operationError instanceof Error ? operationError.message : "ลบหมวดหมู่ไม่สำเร็จ");
+    }
+  }
+
+  return (
+    <div className="category-manager-layer">
+      <button aria-label="ปิดหน้าจัดการหมวดหมู่" className="category-manager-backdrop" onClick={onClose} type="button" />
+      <section aria-labelledby="category-manager-title" aria-modal="true" className="category-manager" role="dialog">
+        <header className="category-manager__header">
+          <div>
+            <h2 id="category-manager-title">จัดการหมวดหมู่</h2>
+            <p>เพิ่ม เปลี่ยนชื่อ และจัดลำดับหมวดเครื่องดื่ม</p>
+          </div>
+          <button aria-label="ปิด" className="icon-button" onClick={onClose} type="button"><X size={20} /></button>
+        </header>
+
+        {error ? <div className="status-banner" role="alert">{error}</div> : null}
+
+        {draft ? (
+          <form className="category-editor" onSubmit={submitCategory}>
+            <label>
+              ชื่อหมวดหมู่
+              <input
+                autoFocus
+                maxLength={50}
+                onChange={(event) => setDraft({ ...draft, label: event.currentTarget.value })}
+                placeholder="เช่น อิตาเลียนโซดา"
+                required
+                value={draft.label}
+              />
+            </label>
+            <div>
+              <span className="category-editor__label">ไอคอน</span>
+              <div className="category-icon-picker">
+                {categoryIconOptions.map((iconName) => {
+                  const Icon = iconMap[iconName] || Store;
+                  return (
+                    <button
+                      aria-label={`เลือกไอคอน ${iconName}`}
+                      aria-pressed={draft.icon === iconName}
+                      className={draft.icon === iconName ? "is-selected" : ""}
+                      key={iconName}
+                      onClick={() => setDraft({ ...draft, icon: iconName })}
+                      type="button"
+                    >
+                      <Icon size={18} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <span className="category-editor__label">สีหมวดหมู่</span>
+              <div className="category-color-picker">
+                {categoryColorOptions.map((color) => (
+                  <button
+                    aria-label={`เลือกสี ${color}`}
+                    aria-pressed={draft.color === color}
+                    className={draft.color === color ? "is-selected" : ""}
+                    key={color}
+                    onClick={() => setDraft({ ...draft, color })}
+                    style={{ background: color }}
+                    type="button"
+                  />
+                ))}
+                <label title="เลือกสีอื่น">
+                  <input
+                    aria-label="เลือกสีอื่น"
+                    onChange={(event) => setDraft({ ...draft, color: event.currentTarget.value })}
+                    type="color"
+                    value={draft.color}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="category-editor__actions">
+              <button className="secondary-button" disabled={saving} onClick={() => setDraft(null)} type="button">ยกเลิก</button>
+              <button className="submit-button" disabled={saving} type="submit">{saving ? "กำลังบันทึก..." : "บันทึกหมวดหมู่"}</button>
+            </div>
+          </form>
+        ) : (
+          <button className="category-add-button" disabled={saving} onClick={startAdd} type="button">
+            <Plus size={18} /> เพิ่มหมวดหมู่
+          </button>
+        )}
+
+        <div className="category-manager__list">
+          {managedCategories.map((category, index) => {
+            const Icon = iconMap[category.icon] || Store;
+            const recipeCount = recipes.filter((recipe) => recipe.categoryId === category.id).length;
+            return (
+              <article className="category-manager__item" key={category.id}>
+                <span className="category-manager__icon" style={{ background: category.color }}><Icon size={19} /></span>
+                <span className="category-manager__name">
+                  <strong>{category.label}</strong>
+                  <small>{recipeCount} สูตร</small>
+                </span>
+                <span className="category-manager__controls">
+                  <button aria-label={`เลื่อน ${category.label} ขึ้น`} disabled={saving || index === 0} onClick={() => void moveCategory(category.id, -1)} type="button"><ChevronUp size={17} /></button>
+                  <button aria-label={`เลื่อน ${category.label} ลง`} disabled={saving || index === managedCategories.length - 1} onClick={() => void moveCategory(category.id, 1)} type="button"><ChevronDown size={17} /></button>
+                  <button aria-label={`แก้ไข ${category.label}`} disabled={saving} onClick={() => startEdit(category)} type="button"><Pencil size={17} /></button>
+                  <button aria-label={`ลบ ${category.label}`} className="is-delete" disabled={saving || managedCategories.length === 1} onClick={() => openDelete(category)} type="button"><Trash2 size={17} /></button>
+                </span>
+              </article>
+            );
+          })}
+        </div>
+
+        {deleteTarget ? (
+          <section className="category-delete-panel" role="alertdialog" aria-label={`ยืนยันลบ ${deleteTarget.label}`}>
+            <strong>ลบหมวด “{deleteTarget.label}”</strong>
+            {recipes.some((recipe) => recipe.categoryId === deleteTarget.id) ? (
+              <label>
+                ย้ายสูตรเดิมไปที่
+                <select onChange={(event) => setReplacementCategoryId(event.currentTarget.value)} value={replacementCategoryId}>
+                  {managedCategories
+                    .filter((category) => category.id !== deleteTarget.id)
+                    .map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}
+                </select>
+              </label>
+            ) : <p>หมวดนี้ไม่มีสูตร สามารถลบได้ทันที</p>}
+            <div>
+              <button className="secondary-button" disabled={saving} onClick={() => setDeleteTarget(null)} type="button">ยกเลิก</button>
+              <button className="danger-button" disabled={saving} onClick={() => void confirmDelete()} type="button">{saving ? "กำลังลบ..." : "ยืนยันลบ"}</button>
+            </div>
+          </section>
+        ) : null}
+      </section>
+    </div>
   );
 }
 
@@ -3110,7 +3445,10 @@ function RecipeForm({
     recipe?.items.length ? recipe.items : [{ ingredientId: ingredients[0]?.id || "", amount: 0, unit: ingredients[0]?.baseUnit || "ml", note: "" }]
   );
   const [imagePreview, setImagePreview] = useState(recipe?.imageUrl || "");
-  const [categoryId, setCategoryId] = useState<CategoryId>(recipe?.categoryId || "tea");
+  const firstCategoryId = categories.find((category) => category.id !== "all")?.id || "";
+  const [categoryId, setCategoryId] = useState<CategoryId>(
+    categories.some((category) => category.id === recipe?.categoryId) ? recipe!.categoryId : firstCategoryId
+  );
   const imageObjectUrl = useRef<string | null>(null);
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const pendingAddedItemIndex = useRef<number | null>(null);
@@ -3169,7 +3507,7 @@ function RecipeForm({
         <FormField defaultValue={recipe?.name} label="ชื่อเมนู" name="name" placeholder="เช่น ชาไทยไข่มุก" required />
         <label>
           หมวดหมู่
-          <select name="categoryId" onChange={(event) => setCategoryId(event.currentTarget.value as CategoryId)} value={categoryId}>
+          <select disabled={!firstCategoryId} name="categoryId" onChange={(event) => setCategoryId(event.currentTarget.value as CategoryId)} required value={categoryId}>
             {categories.slice(1).map((category) => (
               <option value={category.id} key={category.id}>{category.label}</option>
             ))}
@@ -3627,6 +3965,13 @@ function salePaymentBucket(paymentMethod?: PaymentMethod) {
 
 function sanitizeFileName(value: string) {
   return value.replace(/[^a-zA-Z0-9ก-๙_-]+/g, "-").replace(/^-+|-+$/g, "") || "order";
+}
+
+function makeCategoryId() {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().replace(/-/g, "").slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `cat_${Date.now().toString(36)}_${random}`;
 }
 
 function getStoredReceiptPaperSettings(): ReceiptPaperSettings {

@@ -214,6 +214,7 @@ function ensureDefaultCategories(sheet) {
     const id = cleanId(values[row][idIndex]);
     if (id) existing[id] = true;
   }
+  if (Object.keys(existing).length > 0) return;
   DEFAULT_CATEGORIES.forEach((category) => {
     const id = cleanId(category[0]);
     if (existing[id]) return;
@@ -246,6 +247,9 @@ function doPost(e) {
 
     lock = LockService.getScriptLock();
     lock.waitLock(10000);
+    if (action === "saveCategory") return jsonResponse(saveCategory(payload));
+    if (action === "saveCategoryOrder") return jsonResponse(saveCategoryOrder(payload));
+    if (action === "deleteCategory") return jsonResponse(deleteCategory(payload));
     if (action === "saveIngredient") return jsonResponse(saveObject(SHEETS.ingredients, payload));
     if (action === "saveRecipe") return jsonResponse(saveRecipe(payload));
     if (action === "deleteIngredient") return jsonResponse(deleteIngredient(payload.id));
@@ -320,24 +324,122 @@ function getBootstrapData() {
 }
 
 function getCategories() {
-  const rows = readObjects(SHEETS.categories);
-  const byId = {};
-  rows.forEach((row) => {
-    if (row.id) byId[cleanId(row.id)] = row;
+  return readObjects(SHEETS.categories).sort((left, right) => Number(left.sort_order || 999) - Number(right.sort_order || 999));
+}
+
+function saveCategory(payload) {
+  const category = payload.category || payload;
+  category.id = normalizeCategoryId(category.id);
+  category.label = cleanId(category.label).slice(0, 50);
+  if (!category.label) throw new Error("Category name is required.");
+  if (category.id === "all") throw new Error("The all category is reserved.");
+  category.icon = normalizeCategoryIcon(category.icon);
+  category.color = normalizeCategoryColor(category.color);
+  category.sort_order = Math.max(1, Math.min(999, Number(category.sort_order || 999)));
+  category.active = true;
+  const duplicate = readObjects(SHEETS.categories).find((row) =>
+    cleanId(row.id) !== category.id &&
+    cleanId(row.label).toLowerCase() === category.label.toLowerCase() &&
+    String(row.active).toLowerCase() !== "false"
+  );
+  if (duplicate) throw new Error("Category name already exists.");
+  return saveObject(SHEETS.categories, category);
+}
+
+function saveCategoryOrder(payload) {
+  const requestedIds = Array.isArray(payload.category_ids) ? payload.category_ids.map(normalizeCategoryId) : [];
+  const uniqueIds = requestedIds.filter((id, index) => id !== "all" && requestedIds.indexOf(id) === index);
+  if (!uniqueIds.length) throw new Error("Category order is required.");
+
+  const categories = readObjects(SHEETS.categories)
+    .filter((category) => String(category.active).toLowerCase() !== "false")
+    .sort((left, right) => Number(left.sort_order || 999) - Number(right.sort_order || 999));
+  const activeIds = categories.map((category) => cleanId(category.id));
+  uniqueIds.forEach((id) => {
+    if (activeIds.indexOf(id) < 0) throw new Error("Category no longer exists: " + id);
   });
-  DEFAULT_CATEGORIES.forEach((category) => {
-    const id = cleanId(category[0]);
-    if (byId[id]) return;
-    rows.push({
-      id: category[0],
-      label: category[1],
-      icon: category[2],
-      color: category[3],
-      sort_order: category[4],
-      active: category[5]
-    });
+  const orderedIds = uniqueIds.concat(activeIds.filter((id) => uniqueIds.indexOf(id) < 0));
+  const orderById = {};
+  orderedIds.forEach((id, index) => (orderById[id] = index + 1));
+
+  const sheet = getSheet(SHEETS.categories);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { ok: true, category_ids: orderedIds };
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(cleanId);
+  const idIndex = headers.indexOf("id");
+  const sortIndex = headers.indexOf("sort_order");
+  if (idIndex < 0 || sortIndex < 0) throw new Error("Categories columns are missing.");
+  const ids = sheet.getRange(2, idIndex + 1, lastRow - 1, 1).getValues();
+  const sortValues = sheet.getRange(2, sortIndex + 1, lastRow - 1, 1).getValues();
+  ids.forEach((row, index) => {
+    const id = cleanId(row[0]);
+    if (orderById[id]) sortValues[index][0] = orderById[id];
   });
-  return rows;
+  sheet.getRange(2, sortIndex + 1, sortValues.length, 1).setValues(sortValues);
+  return { ok: true, category_ids: orderedIds };
+}
+
+function deleteCategory(payload) {
+  const categoryId = normalizeCategoryId(payload.id);
+  const replacementId = payload.replacement_category_id ? normalizeCategoryId(payload.replacement_category_id) : "";
+  if (categoryId === "all") throw new Error("The all category cannot be deleted.");
+  if (replacementId === categoryId) throw new Error("Replacement category must be different.");
+
+  const categories = readObjects(SHEETS.categories);
+  const current = categories.find((row) => cleanId(row.id) === categoryId && String(row.active).toLowerCase() !== "false");
+  if (!current) return { ok: true, id: categoryId, mode: "already_deleted" };
+  const activeCategories = categories.filter((row) => cleanId(row.id) !== categoryId && String(row.active).toLowerCase() !== "false");
+  if (!activeCategories.length) throw new Error("At least one category must remain.");
+
+  const recipes = readObjects(SHEETS.recipes);
+  const hasRecipes = recipes.some((recipe) => cleanId(recipe.category_id) === categoryId);
+  if (hasRecipes) {
+    const replacement = activeCategories.find((row) => cleanId(row.id) === replacementId);
+    if (!replacement) throw new Error("Choose a replacement category.");
+    reassignRecipeCategory(categoryId, replacementId);
+  }
+
+  return saveObject(SHEETS.categories, {
+    id: categoryId,
+    label: current.label,
+    icon: current.icon,
+    color: current.color,
+    sort_order: current.sort_order,
+    active: false
+  });
+}
+
+function reassignRecipeCategory(sourceId, replacementId) {
+  const sheet = getSheet(SHEETS.recipes);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(cleanId);
+  const categoryIndex = headers.indexOf("category_id");
+  if (categoryIndex < 0) throw new Error("Recipes.category_id column is missing.");
+  const values = sheet.getRange(2, categoryIndex + 1, lastRow - 1, 1).getValues();
+  let changed = false;
+  values.forEach((row) => {
+    if (cleanId(row[0]) !== sourceId) return;
+    row[0] = replacementId;
+    changed = true;
+  });
+  if (changed) sheet.getRange(2, categoryIndex + 1, values.length, 1).setValues(values);
+}
+
+function normalizeCategoryId(value) {
+  const id = cleanId(value);
+  if (!/^[a-z0-9][a-z0-9_-]{1,59}$/i.test(id)) throw new Error("Invalid category id.");
+  return id;
+}
+
+function normalizeCategoryIcon(value) {
+  value = cleanId(value);
+  return ["Store", "CupSoda", "Milk", "Coffee", "GlassWater", "Sparkles", "Cherry", "Package"].indexOf(value) >= 0 ? value : "CupSoda";
+}
+
+function normalizeCategoryColor(value) {
+  value = cleanId(value);
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : "#3f8f18";
 }
 
 function getRecipe(id) {
@@ -350,6 +452,12 @@ function saveRecipe(payload) {
   const recipe = payload.recipe || payload;
   if (!recipe.id) recipe.id = "rec_" + Date.now();
   recipe.id = cleanId(recipe.id);
+  recipe.category_id = normalizeCategoryId(recipe.category_id);
+  const categoryExists = readObjects(SHEETS.categories).some((category) =>
+    cleanId(category.id) === recipe.category_id &&
+    String(category.active).toLowerCase() !== "false"
+  );
+  if (!categoryExists) throw new Error("Selected category is no longer available. Refresh the app and choose another category.");
   sanitizeRecipeImageFields(recipe);
   dedupeObjectsById(SHEETS.recipes, recipe.id);
   if (!recipe.created_at) recipe.created_at = new Date().toISOString();

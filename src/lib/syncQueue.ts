@@ -1,9 +1,12 @@
 import {
+  deleteCategory,
   deleteIngredient,
   deleteRecipe,
   deleteSale,
   isAccessDeniedError,
   safeRecipeImageUrl,
+  saveCategory,
+  saveCategoryOrder,
   saveDailyClosing,
   saveIngredient,
   saveRecipe,
@@ -12,13 +15,16 @@ import {
 } from "./appsScriptApi";
 import type {
   AppData,
+  DeleteCategoryInput,
+  SaveCategoryInput,
+  SaveCategoryOrderInput,
   SaveDailyClosingInput,
   SaveIngredientInput,
   SaveRecipeInput,
   SaveSaleInput,
   UploadImageInput
 } from "./appsScriptApi";
-import type { Recipe } from "../types/app";
+import type { Category, Recipe } from "../types/app";
 import { calculateSaleRevenue } from "./sales";
 
 const DB_NAME = "drink-cost-studio-sync";
@@ -40,9 +46,9 @@ type SaveRecipeWithImagePayload = {
 
 export type SyncMutation = {
   id: string;
-  action: "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "deleteSale" | "saveDailyClosing";
+  action: "saveCategory" | "saveCategoryOrder" | "deleteCategory" | "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "deleteSale" | "saveDailyClosing";
   entityId: string;
-  payload: SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | SaveSaleInput | SaveDailyClosingInput | { id: string };
+  payload: SaveCategoryInput | SaveCategoryOrderInput | DeleteCategoryInput | SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | SaveSaleInput | SaveDailyClosingInput | { id: string };
   createdAt: number;
   attempts: number;
   status: "pending" | "syncing" | "failed";
@@ -96,12 +102,44 @@ export function flushSyncQueue(): Promise<FlushResult> {
 
 export async function applyQueuedMutations(data: AppData): Promise<AppData> {
   const queued = await listMutations();
+  let categories = data.categories.map((category) => ({ ...category }));
   let ingredients = data.ingredients.map((ingredient) => ({ ...ingredient }));
   let recipes = data.recipes.map((recipe) => ({ ...recipe, items: recipe.items.map((item) => ({ ...item })) }));
   let sales = (data.sales || []).map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
   let dailyClosings = (data.dailyClosings || []).map((closing) => ({ ...closing }));
 
   queued.forEach((mutation) => {
+    if (mutation.action === "saveCategory") {
+      const category = mutation.payload as SaveCategoryInput;
+      categories = categories.some((item) => item.id === category.id)
+        ? categories.map((item) => (item.id === category.id ? { ...category } : item))
+        : [...categories, { ...category }];
+      categories = sortCategories(categories);
+      return;
+    }
+
+    if (mutation.action === "saveCategoryOrder") {
+      const payload = mutation.payload as SaveCategoryOrderInput;
+      const orderById = new Map(payload.categoryIds.map((id, index) => [id, index + 1]));
+      categories = sortCategories(categories.map((category) =>
+        category.id === "all" || !orderById.has(category.id)
+          ? category
+          : { ...category, sortOrder: orderById.get(category.id)! }
+      ));
+      return;
+    }
+
+    if (mutation.action === "deleteCategory") {
+      const payload = mutation.payload as DeleteCategoryInput;
+      categories = categories.filter((category) => category.id !== payload.id);
+      if (payload.replacementCategoryId) {
+        recipes = recipes.map((recipe) =>
+          recipe.categoryId === payload.id ? { ...recipe, categoryId: payload.replacementCategoryId! } : recipe
+        );
+      }
+      return;
+    }
+
     if (mutation.action === "saveIngredient") {
       const ingredient = mutation.payload as SaveIngredientInput;
       const costPerUnit = ingredient.costPerUnit ?? (ingredient.buyQty > 0 ? ingredient.buyPrice / ingredient.buyQty : 0);
@@ -188,7 +226,7 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
     }
   });
 
-  return { ...data, ingredients, recipes, sales, dailyClosings };
+  return { ...data, categories, ingredients, recipes, sales, dailyClosings };
 }
 
 async function runFlush(): Promise<FlushResult> {
@@ -230,6 +268,18 @@ async function runFlush(): Promise<FlushResult> {
 }
 
 async function executeMutation(mutation: SyncMutation) {
+  if (mutation.action === "saveCategory") {
+    await saveCategory(mutation.payload as SaveCategoryInput);
+    return;
+  }
+  if (mutation.action === "saveCategoryOrder") {
+    await saveCategoryOrder(mutation.payload as SaveCategoryOrderInput);
+    return;
+  }
+  if (mutation.action === "deleteCategory") {
+    await deleteCategory(mutation.payload as DeleteCategoryInput);
+    return;
+  }
   if (mutation.action === "saveIngredient") {
     await saveIngredient(mutation.payload as SaveIngredientInput);
     return;
@@ -273,6 +323,14 @@ async function executeMutation(mutation: SyncMutation) {
     imageUrl: payload.uploaded.image_url,
     imageFileId: payload.uploaded.file_id
   });
+}
+
+function sortCategories(categories: Category[]) {
+  const all = categories.find((category) => category.id === "all");
+  const managed = categories
+    .filter((category) => category.id !== "all")
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label, "th"));
+  return all ? [all, ...managed] : managed;
 }
 
 function sanitizeSaveRecipePayload(payload: SaveRecipeInput): SaveRecipeInput {

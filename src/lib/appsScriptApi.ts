@@ -7,7 +7,7 @@ const DEFAULT_APPS_SCRIPT_URL =
 export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
 const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v3";
 const ACCESS_KEY_STORAGE_KEY = "drink-cost-studio:access-key:v1";
-const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18" };
+const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18", sortOrder: 0 };
 const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
 type BootstrapResponse = {
@@ -31,6 +31,10 @@ export type AppData = {
 };
 
 export type SaveIngredientInput = Omit<Ingredient, "costPerUnit"> & { costPerUnit?: number };
+
+export type SaveCategoryInput = Category;
+export type SaveCategoryOrderInput = { categoryIds: CategoryId[] };
+export type DeleteCategoryInput = { id: CategoryId; replacementCategoryId?: CategoryId };
 
 export type SaveRecipeInput = {
   id?: string;
@@ -131,6 +135,32 @@ export function cacheAppData(data: AppData) {
 export function clearCachedAppData() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(APP_DATA_CACHE_KEY);
+}
+
+export async function saveCategory(input: SaveCategoryInput) {
+  return postAction("saveCategory", {
+    category: {
+      id: input.id,
+      label: input.label,
+      icon: input.icon,
+      color: input.color,
+      sort_order: Number(input.sortOrder || 0),
+      active: true
+    }
+  });
+}
+
+export async function deleteCategory(input: DeleteCategoryInput) {
+  return postAction("deleteCategory", {
+    id: input.id,
+    replacement_category_id: input.replacementCategoryId || ""
+  });
+}
+
+export async function saveCategoryOrder(input: SaveCategoryOrderInput) {
+  return postAction("saveCategoryOrder", {
+    category_ids: input.categoryIds
+  });
 }
 
 export async function saveIngredient(input: SaveIngredientInput) {
@@ -347,12 +377,14 @@ function normalizeCategories(rows: Array<Record<string, unknown>>): Category[] {
   return rows
     .filter((row) => bool(row.active, true))
     .map((row) => ({
-      id: categoryId(row.id),
+      id: validCategoryId(row.id),
       label: text(row.label || row.name),
       icon: text(row.icon) || "CupSoda",
-      color: text(row.color) || "#3f8f18"
+      color: safeCategoryColor(row.color),
+      sortOrder: Math.max(1, number(row.sort_order || row.sortOrder, 999))
     }))
-    .filter((category) => category.id !== "all" && category.label);
+    .filter((category) => category.id && category.id !== "all" && category.label)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, "th"));
 }
 
 function normalizeIngredients(rows: Array<Record<string, unknown>>): Ingredient[] {
@@ -546,8 +578,17 @@ function inferImageKey(name: string, category: CategoryId) {
 }
 
 function categoryId(value: unknown): CategoryId {
-  const id = text(value) as CategoryId;
-  return ["all", "tea", "milk", "coffee", "soda", "smoothie", "toast", "pangyen"].includes(id) ? id : "tea";
+  return validCategoryId(value) || "tea";
+}
+
+function validCategoryId(value: unknown): CategoryId {
+  const id = text(value);
+  return /^[a-z0-9][a-z0-9_-]{1,59}$/i.test(id) ? id : "";
+}
+
+function safeCategoryColor(value: unknown) {
+  const color = text(value);
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#3f8f18";
 }
 
 function unit(value: unknown): Unit {
@@ -566,8 +607,19 @@ function paymentMethod(value: unknown): PaymentMethod | undefined {
 }
 
 function normalizeAppDataDates(data: AppData): AppData {
+  const categories = (data.categories || [])
+    .map((category, index) => ({
+      ...category,
+      sortOrder: Number.isFinite(Number(category.sortOrder)) ? Number(category.sortOrder) : index
+    }))
+    .sort((left, right) => {
+      if (left.id === "all") return -1;
+      if (right.id === "all") return 1;
+      return left.sortOrder - right.sortOrder;
+    });
   return {
     ...data,
+    categories,
     sales: (data.sales || []).map((sale) => ({ ...sale, saleDate: businessDateKey(sale.saleDate) })),
     dailyClosings: (data.dailyClosings || []).map((closing) => ({ ...closing, businessDate: businessDateKey(closing.businessDate) }))
   };
