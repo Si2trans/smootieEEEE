@@ -7,7 +7,7 @@ const DEFAULT_APPS_SCRIPT_URL =
 export const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || DEFAULT_APPS_SCRIPT_URL;
 const APP_DATA_CACHE_KEY = "drink-cost-studio:app-data:v3";
 const ACCESS_KEY_STORAGE_KEY = "drink-cost-studio:access-key:v1";
-const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18", sortOrder: 0 };
+const ALL_CATEGORY: Category = { id: "all", label: "ทั้งหมด", icon: "Store", color: "#3f8f18", sortOrder: 0, countUnit: "" };
 const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
 type BootstrapResponse = {
@@ -145,6 +145,7 @@ export async function saveCategory(input: SaveCategoryInput) {
       icon: input.icon,
       color: input.color,
       sort_order: Number(input.sortOrder || 0),
+      count_unit: input.countUnit,
       active: true
     }
   });
@@ -219,6 +220,8 @@ export async function saveSale(input: SaveSaleInput) {
       line_revenue: Number(item.lineRevenue || 0),
       line_cost: Number(item.lineCost || 0),
       line_profit: Number(item.lineProfit || 0),
+      category_id: item.categoryId || "",
+      count_unit: item.countUnit || "",
       note: item.note || "",
       sort_order: index + 1
     }))
@@ -368,7 +371,7 @@ function normalizeBootstrapData(data: BootstrapResponse): AppData {
     categories: [ALL_CATEGORY, ...categories],
     ingredients,
     recipes,
-    sales: normalizeSales(data.sales || [], data.saleItems || []),
+    sales: normalizeSales(data.sales || [], data.saleItems || [], recipes, categories),
     dailyClosings: normalizeDailyClosings(data.dailyClosings || [])
   };
 }
@@ -381,7 +384,8 @@ function normalizeCategories(rows: Array<Record<string, unknown>>): Category[] {
       label: text(row.label || row.name),
       icon: text(row.icon) || "CupSoda",
       color: safeCategoryColor(row.color),
-      sortOrder: Math.max(1, number(row.sort_order || row.sortOrder, 999))
+      sortOrder: Math.max(1, number(row.sort_order || row.sortOrder, 999)),
+      countUnit: safeCountUnit(row.count_unit || row.countUnit)
     }))
     .filter((category) => category.id && category.id !== "all" && category.label)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, "th"));
@@ -404,19 +408,29 @@ function normalizeIngredients(rows: Array<Record<string, unknown>>): Ingredient[
   }));
 }
 
-function normalizeSales(saleRows: Array<Record<string, unknown>>, itemRows: Array<Record<string, unknown>>): Sale[] {
+function normalizeSales(
+  saleRows: Array<Record<string, unknown>>,
+  itemRows: Array<Record<string, unknown>>,
+  recipes: Recipe[],
+  categories: Category[]
+): Sale[] {
   const itemsBySale = new Map<string, SaleItem[]>();
+  const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
   itemRows
     .slice()
     .sort((a, b) => number(a.sort_order) - number(b.sort_order))
     .forEach((row) => {
       const saleId = text(row.sale_id || row.saleId);
       if (!saleId) return;
+      const itemId = text(row.item_id || row.itemId);
+      const recipe = recipeById.get(itemId);
+      const snapshotCategoryId = validCategoryId(row.category_id || row.categoryId) || recipe?.categoryId || "";
       const item: SaleItem = {
         id: text(row.id),
         saleId,
         parentId: text(row.parent_id || row.parentId) || undefined,
-        itemId: text(row.item_id || row.itemId),
+        itemId,
         kind: saleItemKind(row.kind),
         name: text(row.name),
         qty: number(row.qty, 1),
@@ -425,6 +439,8 @@ function normalizeSales(saleRows: Array<Record<string, unknown>>, itemRows: Arra
         lineRevenue: number(row.line_revenue || row.lineRevenue),
         lineCost: number(row.line_cost || row.lineCost),
         lineProfit: number(row.line_profit || row.lineProfit),
+        categoryId: snapshotCategoryId || undefined,
+        countUnit: safeCountUnit(row.count_unit || row.countUnit) || categoryById.get(snapshotCategoryId)?.countUnit || undefined,
         note: text(row.note)
       };
       itemsBySale.set(saleId, [...(itemsBySale.get(saleId) || []), item]);
@@ -591,6 +607,10 @@ function safeCategoryColor(value: unknown) {
   return /^#[0-9a-f]{6}$/i.test(color) ? color : "#3f8f18";
 }
 
+function safeCountUnit(value: unknown) {
+  return text(value).slice(0, 20);
+}
+
 function unit(value: unknown): Unit {
   const normalized = text(value) as Unit;
   return ["ml", "g", "piece"].includes(normalized) ? normalized : "ml";
@@ -610,7 +630,8 @@ function normalizeAppDataDates(data: AppData): AppData {
   const categories = (data.categories || [])
     .map((category, index) => ({
       ...category,
-      sortOrder: Number.isFinite(Number(category.sortOrder)) ? Number(category.sortOrder) : index
+      sortOrder: Number.isFinite(Number(category.sortOrder)) ? Number(category.sortOrder) : index,
+      countUnit: safeCountUnit(category.countUnit)
     }))
     .sort((left, right) => {
       if (left.id === "all") return -1;

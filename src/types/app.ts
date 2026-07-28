@@ -8,6 +8,7 @@ export type Category = {
   icon: string;
   color: string;
   sortOrder: number;
+  countUnit: string;
 };
 
 export type Ingredient = {
@@ -75,6 +76,8 @@ export type SaleItem = {
   lineRevenue: number;
   lineCost: number;
   lineProfit: number;
+  categoryId?: CategoryId;
+  countUnit?: string;
   note?: string;
 };
 
@@ -106,4 +109,36 @@ export type DailyClosing = {
   totalProfit: number;
   note?: string;
   closedAt: string;
+};
+
+export type QueueStatus = "waiting" | "preparing" | "served" | "cancelled";
+
+export type QueueAddon = {
+  id: string;
+  ingredientId?: string;
+  name: string;
+  unitPrice?: number;
+};
+
+export type QueueItem = {
+  id: string;
+  queueId: string;
+  recipeId: string;
+  name: string;
+  qty: number;
+  unitPrice?: number;
+  note?: string;
+  addons: QueueAddon[];
+};
+
+export type QueueOrder = {
+  id: string;
+  queueNumber: string;
+  customerName?: string;
+  status: QueueStatus;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+  servedAt?: string;
+  items: QueueItem[];
 };

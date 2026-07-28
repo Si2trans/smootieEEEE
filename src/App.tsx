@@ -2,12 +2,14 @@ import {
   Banknote,
   BarChart3,
   CheckCircle2,
+  ChefHat,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
   ClipboardList,
   Coffee,
+  Clock3,
   CupSoda,
   GlassWater,
   Grid2X2,
@@ -58,9 +60,10 @@ import {
   subscribeSyncState
 } from "./lib/syncQueue";
 import type { SyncState } from "./lib/syncQueue";
+import { getLocalQueueOrders, storeLocalQueueOrders } from "./lib/localQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
 import { calculateSaleRevenue } from "./lib/sales";
-import type { Category, CategoryId, DailyClosing, Ingredient, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, PaymentMethod, QueueAddon, QueueItem, QueueOrder, QueueStatus, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
@@ -102,6 +105,8 @@ type SaleDraftItem = {
   qty: number;
   unitPrice: number;
   unitCost: number;
+  categoryId?: CategoryId;
+  countUnit?: string;
   note: string;
 };
 type SalesSummary = {
@@ -206,6 +211,9 @@ function App() {
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(cachedData?.recipes[0] || null);
   const [categoryList, setCategoryList] = useState<Category[]>(cachedData?.categories || []);
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+  const [queueComposerOpen, setQueueComposerOpen] = useState(false);
+  const [queueBoardOpen, setQueueBoardOpen] = useState(false);
+  const [queueOrders, setQueueOrders] = useState<QueueOrder[]>(() => getLocalQueueOrders());
   const [recipes, setRecipes] = useState<Recipe[]>(cachedData?.recipes || []);
   const [ingredientList, setIngredientList] = useState<Ingredient[]>(cachedData?.ingredients || []);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -422,7 +430,9 @@ function App() {
 
   async function saveManagedCategory(category: Category) {
     const label = category.label.trim();
+    const countUnit = category.countUnit.trim().slice(0, 20);
     if (!label) throw new Error("ใส่ชื่อหมวดหมู่ก่อนบันทึก");
+    if (!countUnit) throw new Error("ใส่หน่วยนับยอดขาย เช่น แก้ว แผ่น หรือถ้วย");
     const duplicate = categoryList.some((item) =>
       item.id !== "all" &&
       item.id !== category.id &&
@@ -437,6 +447,7 @@ function App() {
       const normalized: Category = {
         ...category,
         label,
+        countUnit,
         sortOrder: category.sortOrder || managed.length + 1
       };
       await enqueueMutation({ action: "saveCategory", entityId: normalized.id, payload: normalized });
@@ -631,6 +642,7 @@ function App() {
   function addSaleRecipe(recipe: Recipe) {
     const cost = calculateCost(recipe, ingredientList).totalCost;
     const unitPrice = orderUnitPrice(recipe, saleChannel);
+    const category = categoryList.find((item) => item.id === recipe.categoryId);
     setSaleItems((current) => [
       ...current,
       {
@@ -641,6 +653,8 @@ function App() {
         qty: 1,
         unitPrice,
         unitCost: cost,
+        categoryId: recipe.categoryId,
+        countUnit: category?.countUnit,
         note: ""
       }
     ]);
@@ -734,6 +748,8 @@ function App() {
         qty: item.qty,
         unitPrice: item.unitPrice,
         unitCost: item.unitCost,
+        categoryId: item.categoryId,
+        countUnit: item.countUnit,
         note: item.note || ""
       }))
     );
@@ -809,6 +825,8 @@ function App() {
           lineRevenue,
           lineCost,
           lineProfit: lineRevenue - lineCost,
+          categoryId: item.kind === "recipe" ? item.categoryId : undefined,
+          countUnit: item.kind === "recipe" ? item.countUnit : undefined,
           note: item.note
         };
       });
@@ -870,6 +888,33 @@ function App() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function storeQueuesLocally(nextQueues: QueueOrder[]) {
+    const sorted = nextQueues.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    storeLocalQueueOrders(sorted);
+    setQueueOrders(sorted);
+  }
+
+  async function saveQueueOrder(queue: QueueOrder) {
+    const nextQueues = queueOrders.some((item) => item.id === queue.id)
+      ? queueOrders.map((item) => (item.id === queue.id ? queue : item))
+      : [queue, ...queueOrders];
+    storeQueuesLocally(nextQueues);
+  }
+
+  async function updateQueueStatus(queue: QueueOrder, status: QueueStatus) {
+    const now = new Date().toISOString();
+    await saveQueueOrder({
+      ...queue,
+      status,
+      updatedAt: now,
+      servedAt: status === "served" ? now : undefined
+    });
+  }
+
+  async function refreshQueueBoard() {
+    setQueueOrders(getLocalQueueOrders());
   }
 
   function printOrderReceipt() {
@@ -1193,6 +1238,7 @@ function App() {
               ) : tab === "home" ? (
                 <HomeScreen
                   categories={categoryList}
+                  queueOrders={queueOrders}
                   recipes={recipes}
                   searchQuery={searchQuery}
                   onCategory={(category) => {
@@ -1201,6 +1247,8 @@ function App() {
                   }}
                   onNavigate={setTab}
                   onOpen={openRecipe}
+                  onOpenQueueBoard={() => setQueueBoardOpen(true)}
+                  onOpenQueueComposer={() => setQueueComposerOpen(true)}
                   onSearch={setSearchQuery}
                 />
               ) : tab === "recipes" ? (
@@ -1364,6 +1412,30 @@ function App() {
                 onSave={saveManagedCategory}
               />
             ) : null}
+            {queueComposerOpen ? (
+              <QueueComposer
+                ingredients={ingredientList}
+                queueOrders={queueOrders}
+                recipes={recipes}
+                onClose={() => setQueueComposerOpen(false)}
+                onSave={async (queue) => {
+                  await saveQueueOrder(queue);
+                  setQueueComposerOpen(false);
+                  setMessage(`เพิ่ม ${queue.queueNumber} เข้าคิวแล้ว`);
+                }}
+              />
+            ) : null}
+            {queueBoardOpen ? (
+              <QueueBoard
+                ingredients={ingredientList}
+                queueOrders={queueOrders}
+                recipes={recipes}
+                refreshing={refreshing}
+                onClose={() => setQueueBoardOpen(false)}
+                onRefresh={refreshQueueBoard}
+                onStatus={updateQueueStatus}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -1409,22 +1481,30 @@ function AccessGate({
 
 function HomeScreen({
   categories,
+  queueOrders,
   recipes,
   searchQuery,
   onCategory,
   onOpen,
   onNavigate,
+  onOpenQueueBoard,
+  onOpenQueueComposer,
   onSearch
 }: {
   categories: Category[];
+  queueOrders: QueueOrder[];
   recipes: Recipe[];
   searchQuery: string;
   onCategory: (category: CategoryId) => void;
   onOpen: (recipe: Recipe) => void;
   onNavigate: (tab: Tab) => void;
+  onOpenQueueBoard: () => void;
+  onOpenQueueComposer: () => void;
   onSearch: (query: string) => void;
 }) {
   const homeRecipes = filterRecipes(recipes, searchQuery, categories);
+  const activeQueues = queueOrders.filter((queue) => !["served", "cancelled"].includes(queue.status));
+  const queueCounts = queueStatusCounts(activeQueues);
   return (
     <>
       <header className="home-header">
@@ -1491,7 +1571,424 @@ function HomeScreen({
       {!homeRecipes.length ? (
         <p className="empty-text">{searchQuery.trim() ? "ไม่พบเมนูที่ค้นหา" : "ยังไม่มีสูตรเครื่องดื่ม"}</p>
       ) : null}
+      <section className="home-queue-section">
+        <div className="home-queue-section__title">
+          <div>
+            <h2>คิวงานวันนี้</h2>
+            <span>{activeQueues.length ? `มีงานค้าง ${activeQueues.length} คิว` : "ยังไม่มีคิวที่รอทำ"}</span>
+          </div>
+          {activeQueues.length ? (
+            <button onClick={onOpenQueueBoard} type="button">ดูทั้งหมด <ChevronRight size={14} /></button>
+          ) : null}
+        </div>
+        {activeQueues.length ? (
+          <button className="home-queue-summary" onClick={onOpenQueueBoard} type="button">
+            <span><strong>{queueCounts.waiting}</strong><small>รอทำ</small></span>
+            <span><strong>{queueCounts.preparing}</strong><small>กำลังทำ</small></span>
+          </button>
+        ) : null}
+        <button className="home-queue-create" onClick={onOpenQueueComposer} type="button">
+          <Plus size={18} /> สร้างคิว
+        </button>
+      </section>
     </>
+  );
+}
+
+function QueueComposer({
+  ingredients,
+  queueOrders,
+  recipes,
+  onClose,
+  onSave
+}: {
+  ingredients: Ingredient[];
+  queueOrders: QueueOrder[];
+  recipes: Recipe[];
+  onClose: () => void;
+  onSave: (queue: QueueOrder) => Promise<void>;
+}) {
+  const [queueNumber, setQueueNumber] = useState(() => makeSuggestedQueueNumber(queueOrders));
+  const [customerName, setCustomerName] = useState("");
+  const [search, setSearch] = useState("");
+  const [items, setItems] = useState<QueueItem[]>([]);
+  const [note, setNote] = useState("");
+  const [savingQueue, setSavingQueue] = useState(false);
+  const [error, setError] = useState("");
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleRecipes = recipes
+    .filter((recipe) => recipe.name.toLowerCase().includes(normalizedSearch))
+    .slice(0, normalizedSearch ? 10 : 4);
+  const toppings = ingredients.filter((ingredient) => ingredient.category === "ท็อปปิ้ง");
+  const queueDraftTotal = calculateQueueItemsTotal(items, recipes, ingredients);
+
+  function addRecipe(recipe: Recipe) {
+    setItems((current) => [
+      ...current,
+      {
+        id: makeEntityId("qitem"),
+        queueId: "",
+        recipeId: recipe.id,
+        name: recipe.name,
+        qty: 1,
+        unitPrice: recipe.sellingPrice,
+        note: "",
+        addons: []
+      }
+    ]);
+  }
+
+  function updateItem(itemId: string, patch: Partial<QueueItem>) {
+    setItems((current) => current.map((item) => item.id === itemId ? { ...item, ...patch, qty: Math.max(1, patch.qty ?? item.qty) } : item));
+  }
+
+  function toggleAddon(itemId: string, ingredient: Ingredient) {
+    setItems((current) => current.map((item) => {
+      if (item.id !== itemId) return item;
+      const exists = item.addons.some((addon) => addon.ingredientId === ingredient.id);
+      const addons = exists
+        ? item.addons.filter((addon) => addon.ingredientId !== ingredient.id)
+        : [...item.addons, {
+          id: makeEntityId("qaddon"),
+          ingredientId: ingredient.id,
+          name: ingredient.name,
+          unitPrice: ingredient.addonPrice
+        }];
+      return { ...item, addons };
+    }));
+  }
+
+  async function submitQueue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedNumber = queueNumber.trim();
+    if (!normalizedNumber) {
+      setError("ใส่เลขคิวก่อน");
+      return;
+    }
+    if (!items.length) {
+      setError("เพิ่มเมนูในคิวก่อน");
+      return;
+    }
+    setSavingQueue(true);
+    setError("");
+    try {
+      const now = new Date().toISOString();
+      const queueId = makeEntityId("queue");
+      await onSave({
+        id: queueId,
+        queueNumber: normalizedNumber,
+        customerName: customerName.trim() || undefined,
+        status: "waiting",
+        note: note.trim() || undefined,
+        createdAt: now,
+        updatedAt: now,
+        items: items.map((item) => ({ ...item, queueId }))
+      });
+    } catch (operationError) {
+      setError(operationError instanceof Error ? operationError.message : "เพิ่มคิวไม่สำเร็จ");
+    } finally {
+      setSavingQueue(false);
+    }
+  }
+
+  return (
+    <div className="queue-layer">
+      <button aria-label="ปิดหน้าสร้างคิว" className="queue-backdrop" onClick={onClose} type="button" />
+      <form aria-labelledby="queue-composer-title" aria-modal="true" className="queue-composer" onSubmit={submitQueue} role="dialog">
+        <div className="queue-sheet-handle" />
+        <header className="queue-sheet-header">
+          <div>
+            <h2 id="queue-composer-title">สร้างคิวใหม่</h2>
+            <span>เพิ่มเฉพาะข้อมูลที่ใช้ทำสินค้า</span>
+          </div>
+          <button aria-label="ปิด" onClick={onClose} type="button"><X size={20} /></button>
+        </header>
+        {error ? <div className="status-banner" role="alert">{error}</div> : null}
+        <div className="queue-form-grid">
+          <label>
+            เลขคิว
+            <input autoFocus maxLength={40} onChange={(event) => setQueueNumber(event.currentTarget.value)} required value={queueNumber} />
+          </label>
+          <label>
+            ชื่อลูกค้า
+            <input maxLength={80} onChange={(event) => setCustomerName(event.currentTarget.value)} placeholder="ไม่บังคับ" value={customerName} />
+          </label>
+        </div>
+        <label className="search-box queue-search">
+          <Search size={18} />
+          <input onChange={(event) => setSearch(event.currentTarget.value)} placeholder="ค้นหาเมนูเพื่อเพิ่มเข้าคิว..." value={search} />
+        </label>
+        <div className="queue-recipe-picker">
+          {visibleRecipes.map((recipe) => (
+            <button key={recipe.id} onClick={() => addRecipe(recipe)} type="button">
+              <span><strong>{recipe.name}</strong><small>แตะเพื่อเพิ่มรายการใหม่</small></span>
+              <Plus size={18} />
+            </button>
+          ))}
+          {!visibleRecipes.length ? <p className="empty-text">ไม่พบเมนูที่ค้นหา</p> : null}
+        </div>
+        <section className="queue-draft-list">
+          <div className="queue-draft-list__title">
+            <h3>รายการในคิว</h3>
+            <span>{items.length} รายการ</span>
+          </div>
+          {items.map((item) => (
+            <article className="queue-draft-item" key={item.id}>
+              <div className="queue-draft-item__header">
+                <strong>{item.name}</strong>
+                <button aria-label={`ลบ ${item.name}`} onClick={() => setItems((current) => current.filter((candidate) => candidate.id !== item.id))} type="button">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+              <div className="queue-draft-item__controls">
+                <span>จำนวน</span>
+                <div className="qty-stepper">
+                  <button disabled={item.qty <= 1} onClick={() => updateItem(item.id, { qty: item.qty - 1 })} type="button">-</button>
+                  <strong>{item.qty}</strong>
+                  <button onClick={() => updateItem(item.id, { qty: item.qty + 1 })} type="button">+</button>
+                </div>
+              </div>
+              {toppings.length ? (
+                <div className="queue-addon-picker">
+                  <span>ท็อปปิ้ง</span>
+                  <div>
+                    {toppings.map((topping) => {
+                      const selected = item.addons.some((addon) => addon.ingredientId === topping.id);
+                      return (
+                        <button className={selected ? "is-selected" : ""} key={topping.id} onClick={() => toggleAddon(item.id, topping)} type="button">
+                          {selected ? <CheckCircle2 size={14} /> : <Plus size={14} />} {topping.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <label>
+                หมายเหตุเมนู
+                <input maxLength={300} onChange={(event) => updateItem(item.id, { note: event.currentTarget.value })} placeholder="เช่น หวาน 50% ไม่ใส่น้ำแข็ง" value={item.note || ""} />
+              </label>
+            </article>
+          ))}
+          {!items.length ? <p className="empty-text">เลือกเมนูด้านบนเพื่อเริ่มสร้างคิว</p> : null}
+        </section>
+        <label className="queue-order-note">
+          หมายเหตุทั้งคิว
+          <textarea maxLength={500} onChange={(event) => setNote(event.currentTarget.value)} placeholder="ไม่บังคับ" value={note} />
+        </label>
+        <div className="queue-draft-total">
+          <span>ยอดคิว</span>
+          <strong>{money(queueDraftTotal)} บาท</strong>
+        </div>
+        <div className="queue-composer-actions">
+          <button disabled={savingQueue} onClick={onClose} type="button">ยกเลิก</button>
+          <button disabled={savingQueue || !items.length} type="submit">
+            {savingQueue ? "กำลังเพิ่ม..." : "เพิ่มเข้าคิว"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function QueueBoard({
+  ingredients,
+  queueOrders,
+  recipes,
+  refreshing,
+  onClose,
+  onRefresh,
+  onStatus
+}: {
+  ingredients: Ingredient[];
+  queueOrders: QueueOrder[];
+  recipes: Recipe[];
+  refreshing: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+  onStatus: (queue: QueueOrder, status: QueueStatus) => Promise<void>;
+}) {
+  const [status, setStatus] = useState<Exclude<QueueStatus, "served" | "cancelled">>("waiting");
+  const [preview, setPreview] = useState<{ item: QueueItem; queue: QueueOrder } | null>(null);
+  const [updatingId, setUpdatingId] = useState("");
+  const [error, setError] = useState("");
+  const [completedNotice, setCompletedNotice] = useState("");
+  const noticeTimerRef = useRef<number | null>(null);
+  const activeQueues = queueOrders.filter((queue) => !["served", "cancelled"].includes(queue.status));
+  const counts = queueStatusCounts(activeQueues);
+  const visibleQueues = activeQueues
+    .filter((queue) => queue.status === status)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const servedToday = queueOrders.filter((queue) => queue.status === "served" && localDateKey(queue.servedAt) === todayKey()).length;
+
+  useEffect(() => () => {
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+  }, []);
+
+  async function changeStatus(queue: QueueOrder, nextStatus: QueueStatus) {
+    if (nextStatus === "cancelled" && !window.confirm(`ยกเลิก ${queue.queueNumber} ใช่ไหม?`)) return;
+    setUpdatingId(queue.id);
+    setError("");
+    try {
+      await onStatus(queue, nextStatus);
+      if (nextStatus === "preparing") setStatus("preparing");
+      if (nextStatus === "served") {
+        setStatus("waiting");
+        setCompletedNotice(`${queue.queueNumber} เสร็จแล้ว · ยอด ${money(calculateQueueTotal(queue, recipes, ingredients))} บาท`);
+        if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = window.setTimeout(() => setCompletedNotice(""), 3500);
+      }
+      if (nextStatus === "cancelled") setStatus("waiting");
+    } catch (operationError) {
+      setError(operationError instanceof Error ? operationError.message : "อัปเดตสถานะคิวไม่สำเร็จ");
+    } finally {
+      setUpdatingId("");
+    }
+  }
+
+  return (
+    <section aria-labelledby="queue-board-title" aria-modal="true" className="queue-board" role="dialog">
+      <header className="queue-board__header">
+        <button aria-label="กลับหน้าแรก" onClick={onClose} type="button"><ChevronLeft size={22} /></button>
+        <div><h2 id="queue-board-title">คิวงาน</h2><span>เสิร์ฟแล้ววันนี้ {servedToday} คิว</span></div>
+        <button aria-label="รีเฟรชคิว" disabled={refreshing} onClick={onRefresh} type="button">
+          <RefreshCw className={refreshing ? "is-spinning" : ""} size={19} />
+        </button>
+      </header>
+      {error ? <div className="status-banner" role="alert">{error}</div> : null}
+      <div className="queue-status-tabs">
+        {([
+          ["waiting", "รอทำ", counts.waiting],
+          ["preparing", "กำลังทำ", counts.preparing]
+        ] as const).map(([value, label, count]) => (
+          <button className={status === value ? "is-active" : ""} key={value} onClick={() => setStatus(value)} type="button">
+            <strong>{count}</strong><span>{label}</span>
+          </button>
+        ))}
+      </div>
+      {completedNotice ? <div className="queue-complete-notice" role="status">{completedNotice}</div> : null}
+      <div className="queue-board__list">
+        {visibleQueues.map((queue) => {
+          const queueTotal = calculateQueueTotal(queue, recipes, ingredients);
+          return (
+          <article className={`queue-card queue-card--${queue.status}`} key={queue.id}>
+            <header>
+              <div><strong>{queue.queueNumber}</strong><span>{queue.customerName ? `คุณ ${queue.customerName}` : "ไม่ระบุชื่อลูกค้า"}</span></div>
+              <div className="queue-card__meta">
+                <span><Clock3 size={14} /> {formatQueueWait(queue.createdAt)}</span>
+                <strong>{money(queueTotal)} บาท</strong>
+              </div>
+            </header>
+            <div className="queue-card__items">
+              {queue.items.map((item) => (
+                <button key={item.id} onClick={() => setPreview({ item, queue })} type="button">
+                  <span>
+                    <strong>{item.qty} × {item.name}</strong>
+                    {item.addons.length ? <small>+ {item.addons.map((addon) => addon.name).join(", ")}</small> : null}
+                    {item.note ? <small className="is-note">{item.note}</small> : null}
+                  </span>
+                  <span>ดูสูตร <ChevronRight size={14} /></span>
+                </button>
+              ))}
+            </div>
+            {queue.note ? <p className="queue-card__note"><strong>หมายเหตุคิว:</strong> {queue.note}</p> : null}
+            <div className="queue-card__actions">
+              {queue.status === "waiting" ? (
+                <button disabled={updatingId === queue.id} onClick={() => void changeStatus(queue, "preparing")} type="button"><ChefHat size={16} /> เริ่มทำ</button>
+              ) : null}
+              {queue.status === "preparing" ? (
+                <>
+                  <button disabled={updatingId === queue.id} onClick={() => void changeStatus(queue, "waiting")} type="button">กลับไปรอ</button>
+                  <button disabled={updatingId === queue.id} onClick={() => void changeStatus(queue, "served")} type="button"><CheckCircle2 size={16} /> ทำเสร็จ · {money(queueTotal)} บาท</button>
+                </>
+              ) : null}
+              <button aria-label={`ยกเลิก ${queue.queueNumber}`} className="is-cancel" disabled={updatingId === queue.id} onClick={() => void changeStatus(queue, "cancelled")} type="button">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </article>
+          );
+        })}
+        {!visibleQueues.length ? <div className="queue-empty"><CheckCircle2 size={30} /><strong>ไม่มีคิวในสถานะนี้</strong><span>คิวใหม่สร้างได้จากหน้าแรก</span></div> : null}
+      </div>
+      {preview ? (
+        <QueueRecipePreview
+          ingredients={ingredients}
+          item={preview.item}
+          queue={preview.queue}
+          recipe={recipes.find((recipe) => recipe.id === preview.item.recipeId)}
+          onClose={() => setPreview(null)}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function QueueRecipePreview({
+  ingredients,
+  item,
+  queue,
+  recipe,
+  onClose
+}: {
+  ingredients: Ingredient[];
+  item: QueueItem;
+  queue: QueueOrder;
+  recipe?: Recipe;
+  onClose: () => void;
+}) {
+  const [multiplier, setMultiplier] = useState<1 | "order">(1);
+  const amountMultiplier = multiplier === "order" ? item.qty : 1;
+  const ingredientById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
+
+  return (
+    <div className="queue-recipe-layer">
+      <button aria-label="ปิดสูตร" className="queue-backdrop" onClick={onClose} type="button" />
+      <section aria-labelledby="queue-recipe-title" aria-modal="true" className="queue-recipe-sheet" role="dialog">
+        <div className="queue-sheet-handle" />
+        <header className="queue-sheet-header">
+          <div><h2 id="queue-recipe-title">{item.name}</h2><span>{queue.queueNumber} · จำนวน {item.qty}</span></div>
+          <button aria-label="ปิด" onClick={onClose} type="button"><X size={20} /></button>
+        </header>
+        {!recipe ? <div className="status-banner">ไม่พบสูตรนี้ในข้อมูลปัจจุบัน แต่รายละเอียดออเดอร์ยังอยู่ครบ</div> : null}
+        {recipe ? (
+          <>
+            <div className="queue-recipe-hero">
+              <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
+              <div><span>เวลาทำโดยประมาณ</span><strong>{recipe.prepTime} นาที</strong></div>
+            </div>
+            {item.qty > 1 ? (
+              <div className="queue-recipe-toggle">
+                <button className={multiplier === 1 ? "is-active" : ""} onClick={() => setMultiplier(1)} type="button">ต่อ 1 {recipe ? "รายการ" : "ชิ้น"}</button>
+                <button className={multiplier === "order" ? "is-active" : ""} onClick={() => setMultiplier("order")} type="button">คำนวณ {item.qty} รายการ</button>
+              </div>
+            ) : null}
+            <section className="queue-recipe-section">
+              <h3>ส่วนผสม</h3>
+              {recipe.items.map((recipeItem) => (
+                <div key={`${recipeItem.ingredientId}-${recipeItem.unit}`}>
+                  <span>{ingredientById.get(recipeItem.ingredientId)?.name || recipeItem.ingredientId}</span>
+                  <strong>{formatRecipeAmount(recipeItem.amount * amountMultiplier)} {recipeItem.unit}</strong>
+                </div>
+              ))}
+            </section>
+            <section className="queue-recipe-section">
+              <h3>วิธีทำ</h3>
+              <ol className="steps">
+                {recipe.steps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+            </section>
+          </>
+        ) : null}
+        {(item.addons.length || item.note || queue.note) ? (
+          <section className="queue-order-instructions">
+            <h3>รายละเอียดลูกค้า</h3>
+            {item.addons.length ? <p><strong>ท็อปปิ้ง:</strong> {item.addons.map((addon) => addon.name).join(", ")}</p> : null}
+            {item.note ? <p><strong>หมายเหตุเมนู:</strong> {item.note}</p> : null}
+            {queue.note ? <p><strong>หมายเหตุคิว:</strong> {queue.note}</p> : null}
+          </section>
+        ) : null}
+      </section>
+    </div>
   );
 }
 
@@ -1646,7 +2143,8 @@ function CategoryManager({
       label: "",
       icon: "CupSoda",
       color: categoryColorOptions[managedCategories.length % categoryColorOptions.length],
-      sortOrder: managedCategories.length + 1
+      sortOrder: managedCategories.length + 1,
+      countUnit: "ชิ้น"
     });
   }
 
@@ -1728,6 +2226,16 @@ function CategoryManager({
                 value={draft.label}
               />
             </label>
+            <label>
+              หน่วยนับยอดขาย
+              <input
+                maxLength={20}
+                onChange={(event) => setDraft({ ...draft, countUnit: event.currentTarget.value })}
+                placeholder="เช่น แก้ว แผ่น หรือถ้วย"
+                required
+                value={draft.countUnit}
+              />
+            </label>
             <div>
               <span className="category-editor__label">ไอคอน</span>
               <div className="category-icon-picker">
@@ -1792,7 +2300,7 @@ function CategoryManager({
                 <span className="category-manager__icon" style={{ background: category.color }}><Icon size={19} /></span>
                 <span className="category-manager__name">
                   <strong>{category.label}</strong>
-                  <small>{recipeCount} สูตร</small>
+                  <small>{recipeCount} สูตร · นับเป็น {category.countUnit || "ยังไม่กำหนด"}</small>
                 </span>
                 <span className="category-manager__controls">
                   <button aria-label={`เลื่อน ${category.label} ขึ้น`} disabled={saving || index === 0} onClick={() => void moveCategory(category.id, -1)} type="button"><ChevronUp size={17} /></button>
@@ -2267,6 +2775,7 @@ function SalesScreen({
   const daySales = sales
     .filter((sale) => sale.saleDate === date)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const dayUnitCounts = getSalesUnitCounts(daySales, date, date);
   const parentItems = items.filter((item) => item.kind !== "topping");
   const childItems = items.filter((item) => item.kind === "topping");
 
@@ -2486,6 +2995,7 @@ function SalesScreen({
             <strong>{summary.orderCount}</strong>
           </div>
         </div>
+        <SalesUnitSummary counts={dayUnitCounts} />
         <p className="closing-hint">รวมจากรายการที่บันทึกไว้ของวันที่เลือก ปิดร้านแล้วก็ยังเพิ่มยอดและอัปเดตปิดร้านใหม่ได้</p>
         {existingClosing ? <p className="status-banner">วันนี้เคยบันทึกปิดร้านแล้วเมื่อ {formatReceiptDate(new Date(existingClosing.closedAt))}</p> : null}
         <button className="submit-button submit-button--light" disabled={saving || summary.orderCount === 0} onClick={() => onCloseDay(summary)} type="button">
@@ -2510,6 +3020,20 @@ function SalesDayHistory({ date, onDelete, onEdit, sales }: { date: string; onDe
       <div className="sales-history-list">
         {sales.map((sale) => <SaleHistoryEntry key={sale.id} onDelete={onDelete} onEdit={onEdit} sale={sale} />)}
         {!sales.length ? <p className="empty-text">ยังไม่มีรายการที่บันทึกในวันนี้</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function SalesUnitSummary({ counts }: { counts: Array<{ unit: string; quantity: number }> }) {
+  if (!counts.length) return null;
+  return (
+    <section className="sales-unit-summary" aria-label="จำนวนสินค้าที่ขาย">
+      <span>จำนวนสินค้าที่ขาย</span>
+      <div>
+        {counts.map((count) => (
+          <strong key={count.unit}>{count.quantity.toLocaleString("th-TH")} {count.unit}</strong>
+        ))}
       </div>
     </section>
   );
@@ -2624,6 +3148,7 @@ function ClosingReport({
   const rangeLabel = mode === "week" ? "7 วันล่าสุด" : mode === "month" ? "เดือนนี้" : `${formatThaiDate(reportRange.start)} – ${formatThaiDate(reportRange.end)}`;
   const topMenuRange = getReportDateRange(todayKey(), topMenuMode, "", "");
   const topSellingMenus = getTopSellingMenus(sales, topMenuRange.start, topMenuRange.end);
+  const unitCounts = getSalesUnitCounts(sales, reportRange.start, reportRange.end);
 
   return (
     <section className="closing-panel closing-report">
@@ -2699,6 +3224,7 @@ function ClosingReport({
           <strong>{money(totals.profit)} บาท</strong>
         </div>
       </div>
+      <SalesUnitSummary counts={unitCounts} />
       <div className="sales-charts">
         <div className="metric-chart" aria-label="กราฟเปรียบเทียบรายรับสุทธิ ต้นทุน และกำไร">
           {[
@@ -3851,10 +4377,15 @@ function calculateSaleDraftTotals(items: SaleDraftItem[]) {
 }
 
 function todayKey() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
+  return localDateKey(new Date());
+}
+
+function localDateKey(value?: string | Date) {
+  const date = value instanceof Date ? value : new Date(value || "");
+  if (!Number.isFinite(date.getTime())) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 function getSalesReportRows(sales: Sale[], startDate: string, endDate: string) {
@@ -3880,6 +4411,76 @@ function getTopSellingMenus(sales: Sale[], startDate: string, endDate: string): 
   return Array.from(menus.values())
     .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue || a.name.localeCompare(b.name, "th"))
     .slice(0, 5);
+}
+
+function getSalesUnitCounts(sales: Sale[], startDate: string, endDate: string) {
+  const counts = new Map<string, number>();
+  sales
+    .filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate)
+    .forEach((sale) => {
+      sale.items
+        .filter((item) => item.kind === "recipe" && !item.parentId && item.countUnit)
+        .forEach((item) => counts.set(item.countUnit!, (counts.get(item.countUnit!) || 0) + item.qty));
+    });
+  return Array.from(counts, ([unit, quantity]) => ({ unit, quantity }))
+    .sort((left, right) => right.quantity - left.quantity || left.unit.localeCompare(right.unit, "th"));
+}
+
+function calculateQueueTotal(queue: QueueOrder, recipes: Recipe[], ingredients: Ingredient[]) {
+  return calculateQueueItemsTotal(queue.items, recipes, ingredients);
+}
+
+function calculateQueueItemsTotal(items: QueueItem[], recipes: Recipe[], ingredients: Ingredient[]) {
+  const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
+  const ingredientById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
+  return items.reduce((total, item) => {
+    const recipePrice = item.unitPrice ?? recipeById.get(item.recipeId)?.sellingPrice ?? 0;
+    const addonPrice = item.addons.reduce((sum, addon) => {
+      const price = addon.unitPrice ?? (addon.ingredientId ? ingredientById.get(addon.ingredientId)?.addonPrice : 0) ?? 0;
+      return sum + Math.max(0, Number(price) || 0);
+    }, 0);
+    return total + Math.max(1, item.qty) * (Math.max(0, Number(recipePrice) || 0) + addonPrice);
+  }, 0);
+}
+
+function queueStatusCounts(queues: QueueOrder[]) {
+  return queues.reduce(
+    (counts, queue) => {
+      if (queue.status === "waiting") counts.waiting += 1;
+      if (queue.status === "preparing") counts.preparing += 1;
+      return counts;
+    },
+    { waiting: 0, preparing: 0 }
+  );
+}
+
+function makeSuggestedQueueNumber(queues: QueueOrder[]) {
+  const today = todayKey();
+  const numbers = queues
+    .filter((queue) => localDateKey(queue.createdAt) === today)
+    .map((queue) => Number(/(\d+)$/.exec(queue.queueNumber)?.[1] || 0));
+  return `คิว ${Math.max(0, ...numbers) + 1}`;
+}
+
+function makeEntityId(prefix: string) {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().replace(/-/g, "").slice(0, 12)
+    : Math.random().toString(36).slice(2, 14);
+  return `${prefix}_${Date.now().toString(36)}_${random}`;
+}
+
+function formatQueueWait(createdAt: string) {
+  const timestamp = new Date(createdAt).getTime();
+  if (!Number.isFinite(timestamp)) return "ไม่ระบุเวลา";
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000));
+  if (minutes < 1) return "เพิ่งรับคิว";
+  if (minutes < 60) return `${minutes} นาที`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} ชม. ${minutes % 60} นาที`;
+}
+
+function formatRecipeAmount(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function getReportDateRange(referenceDate: string, mode: ClosingReportMode, customStart: string, customEnd: string): ReportDateRange {

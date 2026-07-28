@@ -11,13 +11,13 @@ const SHEETS = {
 };
 
 const DEFAULT_CATEGORIES = [
-  ["tea", "ชา", "CupSoda", "#f2b634", 1, true],
-  ["milk", "นม", "Milk", "#77bfd3", 2, true],
-  ["coffee", "กาแฟ", "Coffee", "#8a4f1e", 3, true],
-  ["smoothie", "สมูทตี้", "Cherry", "#f04646", 4, true],
-  ["soda", "โซดา", "GlassWater", "#6ea4e8", 5, true],
-  ["toast", "ปังปิ้ง", "Package", "#d48632", 6, true],
-  ["pangyen", "ปังเย็น", "GlassWater", "#8fb7f1", 7, true]
+  ["tea", "ชา", "CupSoda", "#f2b634", 1, "แก้ว", true],
+  ["milk", "นม", "Milk", "#77bfd3", 2, "แก้ว", true],
+  ["coffee", "กาแฟ", "Coffee", "#8a4f1e", 3, "แก้ว", true],
+  ["smoothie", "สมูทตี้", "Cherry", "#f04646", 4, "แก้ว", true],
+  ["soda", "โซดา", "GlassWater", "#6ea4e8", 5, "แก้ว", true],
+  ["toast", "ปังปิ้ง", "Package", "#d48632", 6, "แผ่น", true],
+  ["pangyen", "ปังเย็น", "GlassWater", "#8fb7f1", 7, "ถ้วย", true]
 ];
 const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
@@ -34,7 +34,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.categories,
-      headers: ["id", "label", "icon", "color", "sort_order", "active"],
+      headers: ["id", "label", "icon", "color", "sort_order", "count_unit", "active"],
       rows: DEFAULT_CATEGORIES
     },
     {
@@ -169,7 +169,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.saleItems,
-      headers: ["id", "sale_id", "parent_id", "item_id", "kind", "name", "qty", "unit_price", "unit_cost", "line_revenue", "line_cost", "line_profit", "note", "sort_order"],
+      headers: ["id", "sale_id", "parent_id", "item_id", "kind", "name", "qty", "unit_price", "unit_cost", "line_revenue", "line_cost", "line_profit", "category_id", "count_unit", "note", "sort_order"],
       rows: []
     },
     {
@@ -187,6 +187,8 @@ function setupSpreadsheet() {
     sheet.autoResizeColumns(1, sheet.getLastColumn());
   });
 
+  backfillCategoryCountUnits();
+  backfillSaleItemCountUnits();
   SpreadsheetApp.getActive().toast("ตรวจสอบโครงสร้างชีตแล้ว ข้อมูลเดิมไม่ถูกลบ", "Setup complete", 5);
 }
 
@@ -224,7 +226,8 @@ function ensureDefaultCategories(sheet) {
       icon: category[2],
       color: category[3],
       sort_order: category[4],
-      active: category[5]
+      count_unit: category[5],
+      active: category[6]
     });
   });
 }
@@ -336,6 +339,7 @@ function saveCategory(payload) {
   category.icon = normalizeCategoryIcon(category.icon);
   category.color = normalizeCategoryColor(category.color);
   category.sort_order = Math.max(1, Math.min(999, Number(category.sort_order || 999)));
+  category.count_unit = normalizeCountUnit(category.count_unit);
   category.active = true;
   const duplicate = readObjects(SHEETS.categories).find((row) =>
     cleanId(row.id) !== category.id &&
@@ -405,6 +409,7 @@ function deleteCategory(payload) {
     icon: current.icon,
     color: current.color,
     sort_order: current.sort_order,
+    count_unit: current.count_unit,
     active: false
   });
 }
@@ -440,6 +445,10 @@ function normalizeCategoryIcon(value) {
 function normalizeCategoryColor(value) {
   value = cleanId(value);
   return /^#[0-9a-f]{6}$/i.test(value) ? value : "#3f8f18";
+}
+
+function normalizeCountUnit(value) {
+  return cleanId(value).slice(0, 20);
 }
 
 function getRecipe(id) {
@@ -685,6 +694,12 @@ function saveSale(payload) {
   dedupeObjectsById(SHEETS.sales, sale.id);
   deleteSaleItems(sale.id);
   const saved = saveObject(SHEETS.sales, sale);
+  const recipes = readObjects(SHEETS.recipes);
+  const categories = readObjects(SHEETS.categories);
+  const recipeById = {};
+  const categoryById = {};
+  recipes.forEach((recipe) => (recipeById[cleanId(recipe.id)] = recipe));
+  categories.forEach((category) => (categoryById[cleanId(category.id)] = category));
   items.forEach((item, index) => {
     item.id = cleanId(item.id) || "sitem_" + Date.now() + "_" + index;
     item.sale_id = sale.id;
@@ -698,6 +713,10 @@ function saveSale(payload) {
     item.line_revenue = Number(item.line_revenue || 0);
     item.line_cost = Number(item.line_cost || 0);
     item.line_profit = Number(item.line_profit || 0);
+    const recipe = recipeById[item.item_id];
+    item.category_id = cleanId(item.category_id || (recipe && recipe.category_id));
+    const category = categoryById[item.category_id];
+    item.count_unit = normalizeCountUnit(item.count_unit || (category && category.count_unit));
     item.note = cleanId(item.note || "");
     item.sort_order = index + 1;
     saveObject(SHEETS.saleItems, item);
@@ -753,6 +772,59 @@ function saveDailyClosing(payload) {
   dedupeObjectsById(SHEETS.dailyClosings, closing.id);
   const saved = saveObject(SHEETS.dailyClosings, closing);
   return { ok: true, closing: saved.item || closing };
+}
+
+function backfillCategoryCountUnits() {
+  const defaults = { tea: "แก้ว", milk: "แก้ว", coffee: "แก้ว", smoothie: "แก้ว", soda: "แก้ว", toast: "แผ่น", pangyen: "ถ้วย" };
+  const sheet = getSheet(SHEETS.categories);
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return 0;
+  const headers = values[0];
+  const idIndex = headers.indexOf("id");
+  const unitIndex = headers.indexOf("count_unit");
+  if (idIndex < 0 || unitIndex < 0) return 0;
+  let changed = 0;
+  for (let row = 1; row < values.length; row++) {
+    const id = cleanId(values[row][idIndex]);
+    if (cleanId(values[row][unitIndex]) || !defaults[id]) continue;
+    values[row][unitIndex] = defaults[id];
+    changed += 1;
+  }
+  if (changed) sheet.getRange(2, unitIndex + 1, values.length - 1, 1).setValues(values.slice(1).map((row) => [row[unitIndex]]));
+  return changed;
+}
+
+function backfillSaleItemCountUnits() {
+  const sheet = getSheet(SHEETS.saleItems);
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return 0;
+  const headers = values[0];
+  const itemIndex = headers.indexOf("item_id");
+  const kindIndex = headers.indexOf("kind");
+  const categoryIndex = headers.indexOf("category_id");
+  const unitIndex = headers.indexOf("count_unit");
+  if ([itemIndex, kindIndex, categoryIndex, unitIndex].some((index) => index < 0)) return 0;
+  const recipeById = {};
+  readObjects(SHEETS.recipes).forEach((recipe) => (recipeById[cleanId(recipe.id)] = recipe));
+  const categoryById = {};
+  readObjects(SHEETS.categories).forEach((category) => (categoryById[cleanId(category.id)] = category));
+  let changed = 0;
+  for (let row = 1; row < values.length; row++) {
+    if (cleanId(values[row][kindIndex]) !== "recipe") continue;
+    const recipe = recipeById[cleanId(values[row][itemIndex])];
+    if (!recipe) continue;
+    const categoryId = cleanId(values[row][categoryIndex] || recipe.category_id);
+    const countUnit = normalizeCountUnit(values[row][unitIndex] || (categoryById[categoryId] && categoryById[categoryId].count_unit));
+    if (cleanId(values[row][categoryIndex]) === categoryId && cleanId(values[row][unitIndex]) === countUnit) continue;
+    values[row][categoryIndex] = categoryId;
+    values[row][unitIndex] = countUnit;
+    changed += 1;
+  }
+  if (changed) {
+    sheet.getRange(2, categoryIndex + 1, values.length - 1, 1).setValues(values.slice(1).map((row) => [row[categoryIndex]]));
+    sheet.getRange(2, unitIndex + 1, values.length - 1, 1).setValues(values.slice(1).map((row) => [row[unitIndex]]));
+  }
+  return changed;
 }
 
 function calculateCost(recipeId) {
