@@ -17,7 +17,7 @@ const DEFAULT_CATEGORIES = [
   ["smoothie", "สมูทตี้", "Cherry", "#f04646", 4, "แก้ว", true],
   ["soda", "โซดา", "GlassWater", "#6ea4e8", 5, "แก้ว", true],
   ["toast", "ปังปิ้ง", "Package", "#d48632", 6, "แผ่น", true],
-  ["pangyen", "ปังเย็น", "GlassWater", "#8fb7f1", 7, "ถ้วย", true]
+  ["pangyen", "ปังเย็น", "GlassWater", "#8fb7f1", 7, "แก้ว", true]
 ];
 const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
@@ -775,7 +775,7 @@ function saveDailyClosing(payload) {
 }
 
 function backfillCategoryCountUnits() {
-  const defaults = { tea: "แก้ว", milk: "แก้ว", coffee: "แก้ว", smoothie: "แก้ว", soda: "แก้ว", toast: "แผ่น", pangyen: "ถ้วย" };
+  const defaults = { tea: "แก้ว", milk: "แก้ว", coffee: "แก้ว", smoothie: "แก้ว", soda: "แก้ว", toast: "แผ่น", pangyen: "แก้ว" };
   const sheet = getSheet(SHEETS.categories);
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return 0;
@@ -786,7 +786,8 @@ function backfillCategoryCountUnits() {
   let changed = 0;
   for (let row = 1; row < values.length; row++) {
     const id = cleanId(values[row][idIndex]);
-    if (cleanId(values[row][unitIndex]) || !defaults[id]) continue;
+    const currentUnit = cleanId(values[row][unitIndex]);
+    if (!defaults[id] || (currentUnit && !(id === "pangyen" && currentUnit === "ถ้วย"))) continue;
     values[row][unitIndex] = defaults[id];
     changed += 1;
   }

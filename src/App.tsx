@@ -140,6 +140,15 @@ type ReceiptPaperSettings = {
 const iconMap: Record<string, ElementType> = { Store, CupSoda, Milk, Coffee, GlassWater, Sparkles, Cherry: Sparkles, Package };
 const categoryIconOptions = ["CupSoda", "Milk", "Coffee", "GlassWater", "Sparkles", "Package", "Store"];
 const categoryColorOptions = ["#f2b634", "#77bfd3", "#8a4f1e", "#f04646", "#6ea4e8", "#d48632", "#3f8f18"];
+const defaultCountUnitByCategory = new Map<CategoryId, string>([
+  ["tea", "แก้ว"],
+  ["milk", "แก้ว"],
+  ["coffee", "แก้ว"],
+  ["smoothie", "แก้ว"],
+  ["soda", "แก้ว"],
+  ["toast", "แผ่น"],
+  ["pangyen", "แก้ว"]
+]);
 const ingredientCategories = ["วัตถุดิบน้ำ", "ท็อปปิ้ง", "บรรจุภัณฑ์"];
 const units: Unit[] = ["ml", "g", "piece"];
 const receiptPaperStorageKey = "drink-cost-receipt-paper";
@@ -1304,6 +1313,7 @@ function App() {
                 />
               ) : tab === "sales" ? (
                 <SalesScreen
+                  categories={categoryList}
                   channels={["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"]}
                   channel={saleChannel}
                   closings={dailyClosings}
@@ -2695,6 +2705,7 @@ function PromotionEditor({
 }
 
 function SalesScreen({
+  categories,
   channels,
   channel,
   closings,
@@ -2729,6 +2740,7 @@ function SalesScreen({
   onSubmit,
   onUpdateItem
 }: {
+  categories: Category[];
   channels: string[];
   channel: string;
   closings: DailyClosing[];
@@ -2775,7 +2787,7 @@ function SalesScreen({
   const daySales = sales
     .filter((sale) => sale.saleDate === date)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const dayUnitCounts = getSalesUnitCounts(daySales, date, date);
+  const dayUnitCounts = getSalesUnitCounts(daySales, date, date, recipes, categories);
   const parentItems = items.filter((item) => item.kind !== "topping");
   const childItems = items.filter((item) => item.kind === "topping");
 
@@ -3002,7 +3014,7 @@ function SalesScreen({
           {existingClosing ? "อัปเดตยอดปิดร้าน" : "บันทึกปิดร้าน"}
         </button>
       </section>
-      <ClosingReport closings={closings} onDelete={onDeleteSale} onEdit={onEditSale} sales={sales} />
+      <ClosingReport categories={categories} closings={closings} onDelete={onDeleteSale} onEdit={onEditSale} recipes={recipes} sales={sales} />
     </>
   );
 }
@@ -3096,14 +3108,18 @@ function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) =
 }
 
 function ClosingReport({
+  categories,
   closings,
   onDelete,
   onEdit,
+  recipes,
   sales
 }: {
+  categories: Category[];
   closings: DailyClosing[];
   onDelete: (sale: Sale) => void;
   onEdit: (sale: Sale) => void;
+  recipes: Recipe[];
   sales: Sale[];
 }) {
   const [mode, setMode] = useState<ClosingReportMode>("week");
@@ -3148,7 +3164,7 @@ function ClosingReport({
   const rangeLabel = mode === "week" ? "7 วันล่าสุด" : mode === "month" ? "เดือนนี้" : `${formatThaiDate(reportRange.start)} – ${formatThaiDate(reportRange.end)}`;
   const topMenuRange = getReportDateRange(todayKey(), topMenuMode, "", "");
   const topSellingMenus = getTopSellingMenus(sales, topMenuRange.start, topMenuRange.end);
-  const unitCounts = getSalesUnitCounts(sales, reportRange.start, reportRange.end);
+  const unitCounts = getSalesUnitCounts(sales, reportRange.start, reportRange.end, recipes, categories);
 
   return (
     <section className="closing-panel closing-report">
@@ -4413,14 +4429,33 @@ function getTopSellingMenus(sales: Sale[], startDate: string, endDate: string): 
     .slice(0, 5);
 }
 
-function getSalesUnitCounts(sales: Sale[], startDate: string, endDate: string) {
+function getSalesUnitCounts(
+  sales: Sale[],
+  startDate: string,
+  endDate: string,
+  recipes: Recipe[],
+  categories: Category[]
+) {
   const counts = new Map<string, number>();
+  const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
   sales
     .filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate)
     .forEach((sale) => {
       sale.items
-        .filter((item) => item.kind === "recipe" && !item.parentId && item.countUnit)
-        .forEach((item) => counts.set(item.countUnit!, (counts.get(item.countUnit!) || 0) + item.qty));
+        .filter((item) => item.kind === "recipe" && !item.parentId)
+        .forEach((item) => {
+          const recipe = recipeById.get(item.itemId);
+          const currentCategoryId = recipe?.categoryId || item.categoryId;
+          const configuredUnit = (currentCategoryId ? categoryById.get(currentCategoryId)?.countUnit : "")?.trim();
+          const unit = currentCategoryId === "pangyen" && configuredUnit === "ถ้วย"
+            ? "แก้ว"
+            : configuredUnit
+            || (currentCategoryId ? defaultCountUnitByCategory.get(currentCategoryId) : "")
+            || item.countUnit?.trim();
+          if (!unit) return;
+          counts.set(unit, (counts.get(unit) || 0) + item.qty);
+        });
     });
   return Array.from(counts, ([unit, quantity]) => ({ unit, quantity }))
     .sort((left, right) => right.quantity - left.quantity || left.unit.localeCompare(right.unit, "th"));
