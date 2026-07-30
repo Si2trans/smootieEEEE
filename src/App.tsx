@@ -1946,8 +1946,6 @@ function QueueRecipePreview({
   recipe?: Recipe;
   onClose: () => void;
 }) {
-  const [multiplier, setMultiplier] = useState<1 | "order">(1);
-  const amountMultiplier = multiplier === "order" ? item.qty : 1;
   const ingredientById = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
 
   return (
@@ -1966,18 +1964,15 @@ function QueueRecipePreview({
               <DrinkArt imageKey={recipe.imageKey} imageUrl={recipe.imageUrl} />
               <div><span>เวลาทำโดยประมาณ</span><strong>{recipe.prepTime} นาที</strong></div>
             </div>
-            {item.qty > 1 ? (
-              <div className="queue-recipe-toggle">
-                <button className={multiplier === 1 ? "is-active" : ""} onClick={() => setMultiplier(1)} type="button">ต่อ 1 {recipe ? "รายการ" : "ชิ้น"}</button>
-                <button className={multiplier === "order" ? "is-active" : ""} onClick={() => setMultiplier("order")} type="button">คำนวณ {item.qty} รายการ</button>
-              </div>
-            ) : null}
             <section className="queue-recipe-section">
               <h3>ส่วนผสม</h3>
               {recipe.items.map((recipeItem) => (
-                <div key={`${recipeItem.ingredientId}-${recipeItem.unit}`}>
+                <div key={`${recipeItem.ingredientId}-${recipeItem.amount}-${recipeItem.unit}-${recipeItem.note || ""}`}>
                   <span>{ingredientById.get(recipeItem.ingredientId)?.name || recipeItem.ingredientId}</span>
-                  <strong>{formatRecipeAmount(recipeItem.amount * amountMultiplier)} {recipeItem.unit}</strong>
+                  <strong>
+                    {recipeItem.note ? `${recipeItem.note} · ` : ""}
+                    {formatRecipeAmount(recipeItem.amount)} {recipeItem.unit}
+                  </strong>
                 </div>
               ))}
             </section>
