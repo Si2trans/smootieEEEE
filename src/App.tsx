@@ -14,6 +14,7 @@ import {
   GlassWater,
   Grid2X2,
   Home,
+  EyeOff,
   KeyRound,
   Landmark,
   Milk,
@@ -87,6 +88,8 @@ type OrderItem = {
   addons: OrderAddon[];
 };
 type PaymentMethodSelection = PaymentMethod | "";
+const hiddenOrderPaymentMethod = "ไม่แสดงวิธีชำระ" as const;
+type OrderPaymentMethodSelection = PaymentMethodSelection | typeof hiddenOrderPaymentMethod;
 const paymentMethodOptions: Array<{
   icon: ElementType;
   value: PaymentMethod;
@@ -195,7 +198,7 @@ function App() {
   const [orderNote, setOrderNote] = useState("");
   const [orderPromotionName, setOrderPromotionName] = useState("");
   const [orderPromotionAmount, setOrderPromotionAmount] = useState(0);
-  const [orderPaymentMethod, setOrderPaymentMethod] = useState<PaymentMethodSelection>("");
+  const [orderPaymentMethod, setOrderPaymentMethod] = useState<OrderPaymentMethodSelection>("");
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
@@ -941,6 +944,16 @@ function App() {
     setReceiptPreviewOpen(true);
   }
 
+  function changeOrderChannel(nextChannel: string) {
+    const previousChannel = orderChannel;
+    setOrderChannel(nextChannel);
+    setOrderPaymentMethod((current) => {
+      if (nextChannel === "Grab") return hiddenOrderPaymentMethod;
+      if (previousChannel === "Grab" && current === hiddenOrderPaymentMethod) return "";
+      return current;
+    });
+  }
+
   async function renderReceiptImage() {
     const paper = receiptPaperRef.current;
     if (!paper) throw new Error("Receipt preview is not ready.");
@@ -1291,7 +1304,7 @@ function App() {
                   total={orderTotal}
                   onAddItem={addOrderItem}
                   onAddAddon={addOrderAddon}
-                  onChannel={setOrderChannel}
+                  onChannel={changeOrderChannel}
                   onClear={() => {
                     setOrderItems([]);
                     setOrderPaymentMethod("");
@@ -2379,7 +2392,7 @@ function OrderScreen({
   items: OrderItem[];
   note: string;
   orderNumber: string;
-  paymentMethod: PaymentMethodSelection;
+  paymentMethod: OrderPaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
   recipes: Recipe[];
@@ -2393,7 +2406,7 @@ function OrderScreen({
   onCustomerName: (name: string) => void;
   onNote: (note: string) => void;
   onOrderNumber: (value: string) => void;
-  onPaymentMethod: (value: PaymentMethodSelection) => void;
+  onPaymentMethod: (value: OrderPaymentMethodSelection) => void;
   onPromotionAmount: (value: number) => void;
   onPromotionName: (value: string) => void;
   onPrint: () => void;
@@ -2561,7 +2574,7 @@ function OrderScreen({
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ลูกค้าขอรับเร็ว แยกถุง" value={note} />
       </label>
 
-      <PaymentMethodField onChange={onPaymentMethod} value={paymentMethod} />
+      <PaymentMethodField allowHidden onChange={onPaymentMethod} value={paymentMethod} />
 
       <section className="order-summary order-summary--stacked">
         <div><span>รวมทั้งหมด</span><strong>{money(grossTotal)} บาท</strong></div>
@@ -2576,11 +2589,13 @@ function OrderScreen({
 }
 
 function PaymentMethodField({
+  allowHidden = false,
   onChange,
   value
 }: {
-  onChange: (value: PaymentMethodSelection) => void;
-  value: PaymentMethodSelection;
+  allowHidden?: boolean;
+  onChange: (value: OrderPaymentMethodSelection) => void;
+  value: OrderPaymentMethodSelection;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -2632,6 +2647,21 @@ function PaymentMethodField({
                   </button>
                 );
               })}
+              {allowHidden ? (
+                <button
+                  aria-pressed={value === hiddenOrderPaymentMethod}
+                  className={`payment-method-option${value === hiddenOrderPaymentMethod ? " is-selected" : ""}`}
+                  onClick={() => {
+                    onChange(hiddenOrderPaymentMethod);
+                    setOpen(false);
+                  }}
+                  type="button"
+                >
+                  <span className="payment-method-option__icon"><EyeOff size={20} /></span>
+                  <strong>{hiddenOrderPaymentMethod}</strong>
+                  {value === hiddenOrderPaymentMethod ? <CheckCircle2 size={18} /> : null}
+                </button>
+              ) : null}
             </div>
           </section>
         </div>
@@ -2915,7 +2945,12 @@ function SalesScreen({
         <textarea onChange={(event) => onNote(event.currentTarget.value)} placeholder="เช่น ยอดจากสมุด หรือขายนอกรอบ" value={note} />
       </label>
 
-      <PaymentMethodField onChange={onPaymentMethod} value={paymentMethod} />
+      <PaymentMethodField
+        onChange={(value) => {
+          if (value !== hiddenOrderPaymentMethod) onPaymentMethod(value);
+        }}
+        value={paymentMethod}
+      />
 
       <section className="sales-summary-card">
         {totals.promotionAmount > 0 ? (
@@ -3366,7 +3401,7 @@ function OrderReceipt({
   isGeneratingPdf: boolean;
   items: OrderItem[];
   note: string;
-  paymentMethod: PaymentMethodSelection;
+  paymentMethod: OrderPaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
   onClose: () => void;
@@ -3550,7 +3585,9 @@ function OrderReceipt({
           ))}
         </section>
         <div className="receipt-payment-summary">
-          <div><span>วิธีชำระเงิน</span><strong>{paymentMethod}</strong></div>
+          {paymentMethod !== hiddenOrderPaymentMethod ? (
+            <div><span>วิธีชำระเงิน</span><strong>{paymentMethod}</strong></div>
+          ) : null}
           <div><span>รวมทั้งหมด</span><strong>{money(grossTotal)}</strong></div>
           {promotionAmount > 0 ? (
             <div><span>{promotionName.trim() || "ส่วนลดร้านค้า"}</span><strong>-{money(promotionAmount)}</strong></div>
