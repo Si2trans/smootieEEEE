@@ -2589,6 +2589,40 @@ p {
   padding: 8px 10px;
 }
 
+.order-sweetness {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.order-sweetness > span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.order-sweetness > div {
+  display: grid;
+  grid-template-columns: repeat(2, 68px);
+  gap: 6px;
+}
+
+.order-sweetness button {
+  min-height: 34px;
+  border: 1px solid #dfe5da;
+  border-radius: 10px;
+  background: #f4f7f2;
+  color: #52604d;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.order-sweetness button.is-active {
+  border-color: #2b8a16;
+  background: #2b8a16;
+  color: #fff;
+}
+
 .order-addon-section {
   display: grid;
   gap: 7px;
@@ -3089,6 +3123,24 @@ p {
 .receipt-item span {
   text-align: right;
   font-weight: 900;
+}
+
+.receipt-item .receipt-item__sweetness {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5mm;
+  margin: 1mm 0 0 4mm;
+  font-size: 9.5px;
+}
+
+.receipt-item .receipt-item__sweetness span {
+  text-align: left;
+  color: #555;
+  font-weight: 500;
+}
+
+.receipt-item .receipt-item__sweetness strong {
+  padding-left: 2mm;
 }
 
 .receipt-item p,

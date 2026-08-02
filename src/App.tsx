@@ -78,12 +78,14 @@ type OrderAddon = {
   name: string;
   price: number;
 };
+type OrderSweetness = "" | "50%" | "100%";
 type OrderItem = {
   id: string;
   recipeId: string;
   name: string;
   qty: number;
   unitPrice: number;
+  sweetness: OrderSweetness;
   note: string;
   addons: OrderAddon[];
 };
@@ -590,6 +592,7 @@ function App() {
         name: recipe.name,
         qty: 1,
         unitPrice,
+        sweetness: "",
         note: "",
         addons: []
       }
@@ -2528,6 +2531,22 @@ function OrderScreen({
                 <strong>{money(orderItemTotal(item))} บาท</strong>
               </div>
             </div>
+            <div className="order-sweetness">
+              <span>ความหวาน</span>
+              <div>
+                {(["50%", "100%"] as const).map((sweetness) => (
+                  <button
+                    aria-pressed={item.sweetness === sweetness}
+                    className={item.sweetness === sweetness ? "is-active" : ""}
+                    key={sweetness}
+                    onClick={() => onUpdateItem(item.id, { sweetness: item.sweetness === sweetness ? "" : sweetness })}
+                    type="button"
+                  >
+                    {sweetness}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="order-addon-section">
               {item.addons.map((addon) => (
                 <div className="order-addon-row" key={addon.id}>
@@ -3576,6 +3595,12 @@ function OrderReceipt({
                 <strong>{item.qty} x {item.name}</strong>
                 <span>{money(orderItemTotal(item))}</span>
               </div>
+              {item.sweetness ? (
+                <div className="receipt-item__sweetness">
+                  <span>ความหวาน</span>
+                  <strong>• หวาน {item.sweetness}</strong>
+                </div>
+              ) : null}
               {item.addons.length || item.note ? (
                 <p>
                   {[
