@@ -2509,6 +2509,24 @@ p {
   background: #fff1ef;
 }
 
+.order-item__name {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid #dfe5da;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #172112;
+}
+
+.order-item__name:focus {
+  border-color: #2b8a16;
+  box-shadow: 0 0 0 3px rgba(43, 138, 22, 0.12);
+  outline: 0;
+}
+
 .order-item__grid {
   display: grid;
   grid-template-columns: 0.7fr 0.9fr 0.8fr;

@@ -2487,7 +2487,12 @@ function OrderScreen({
         {items.map((item) => (
           <div className="order-item" key={item.id}>
             <div className="order-item__header">
-              <strong>{item.name}</strong>
+              <input
+                aria-label={`ชื่อเมนู ${item.name}`}
+                className="order-item__name"
+                onChange={(event) => onUpdateItem(item.id, { name: event.currentTarget.value })}
+                value={item.name}
+              />
               <button onClick={() => onRemoveItem(item.id)} type="button">
                 <Trash2 size={14} />
               </button>
