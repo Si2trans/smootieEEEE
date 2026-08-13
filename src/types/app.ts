@@ -111,6 +111,44 @@ export type DailyClosing = {
   closedAt: string;
 };
 
+export type MonthlyArchiveUnitCount = {
+  unit: string;
+  quantity: number;
+};
+
+export type MonthlyArchiveMenu = {
+  itemId: string;
+  name: string;
+  quantity: number;
+  revenue: number;
+};
+
+export type MonthlyArchiveDay = {
+  date: string;
+  orderCount: number;
+  itemCount: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  cashRevenue: number;
+  transferRevenue: number;
+  unassignedRevenue: number;
+  unitCounts: MonthlyArchiveUnitCount[];
+  topMenus: MonthlyArchiveMenu[];
+};
+
+export type MonthlyArchive = {
+  id: string;
+  monthKey: string;
+  orderCount: number;
+  itemCount: number;
+  totalRevenue: number;
+  totalCost: number;
+  totalProfit: number;
+  dailySummaries: MonthlyArchiveDay[];
+  archivedAt: string;
+};
+
 export type QueueStatus = "waiting" | "preparing" | "served" | "cancelled";
 
 export type QueueAddon = {

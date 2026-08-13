@@ -1,4 +1,4 @@
-import type { Category, CategoryId, DailyClosing, Ingredient, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
 import { calculateSaleRevenue } from "./sales";
 
 const DEFAULT_APPS_SCRIPT_URL =
@@ -20,6 +20,8 @@ type BootstrapResponse = {
   sales?: Array<Record<string, unknown>>;
   saleItems?: Array<Record<string, unknown>>;
   dailyClosings?: Array<Record<string, unknown>>;
+  monthlyArchives?: Array<Record<string, unknown>>;
+  archiveMonths?: unknown[];
 };
 
 export type AppData = {
@@ -28,6 +30,8 @@ export type AppData = {
   recipes: Recipe[];
   sales: Sale[];
   dailyClosings: DailyClosing[];
+  monthlyArchives: MonthlyArchive[];
+  archiveMonths: string[];
 };
 
 export type SaveIngredientInput = Omit<Ingredient, "costPerUnit"> & { costPerUnit?: number };
@@ -246,6 +250,12 @@ export async function saveDailyClosing(input: SaveDailyClosingInput) {
   });
 }
 
+export async function archiveSalesMonth(monthKey: string) {
+  const response = (await postAction("archiveSalesMonth", { month_key: monthKey })) as { archive?: Record<string, unknown> };
+  if (!response.archive) throw new Error("ไม่ได้รับข้อมูลสรุปรายเดือนจาก Google Sheet");
+  return normalizeMonthlyArchive(response.archive);
+}
+
 export async function saveRecipe(input: SaveRecipeInput) {
   return postAction("saveRecipe", {
     recipe: {
@@ -372,7 +382,9 @@ function normalizeBootstrapData(data: BootstrapResponse): AppData {
     ingredients,
     recipes,
     sales: normalizeSales(data.sales || [], data.saleItems || [], recipes, categories),
-    dailyClosings: normalizeDailyClosings(data.dailyClosings || [])
+    dailyClosings: normalizeDailyClosings(data.dailyClosings || []),
+    monthlyArchives: normalizeMonthlyArchives(data.monthlyArchives || []),
+    archiveMonths: Array.from(new Set((data.archiveMonths || []).map(text).filter((value) => /^\d{4}-\d{2}$/.test(value)))).sort().reverse()
   };
 }
 
@@ -486,6 +498,59 @@ function normalizeDailyClosings(rows: Array<Record<string, unknown>>): DailyClos
       closedAt: text(row.closed_at || row.closedAt)
     }))
     .filter((closing) => closing.id && closing.businessDate);
+}
+
+function normalizeMonthlyArchives(rows: Array<Record<string, unknown>>): MonthlyArchive[] {
+  return rows.map(normalizeMonthlyArchive).filter((archive) => archive.id && archive.monthKey);
+}
+
+function normalizeMonthlyArchive(row: Record<string, unknown>): MonthlyArchive {
+  const dailyRows = jsonArray(row.daily_json || row.dailySummaries);
+  return {
+    id: text(row.id),
+    monthKey: text(row.month_key || row.monthKey),
+    orderCount: number(row.order_count || row.orderCount),
+    itemCount: number(row.item_count || row.itemCount),
+    totalRevenue: number(row.total_revenue || row.totalRevenue),
+    totalCost: number(row.total_cost || row.totalCost),
+    totalProfit: number(row.total_profit || row.totalProfit),
+    dailySummaries: dailyRows.map(normalizeMonthlyArchiveDay).filter((day) => day.date),
+    archivedAt: text(row.archived_at || row.archivedAt)
+  };
+}
+
+function normalizeMonthlyArchiveDay(value: unknown): MonthlyArchiveDay {
+  const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    date: businessDateKey(row.date),
+    orderCount: number(row.orderCount || row.order_count),
+    itemCount: number(row.itemCount || row.item_count),
+    revenue: number(row.revenue || row.total_revenue),
+    cost: number(row.cost || row.total_cost),
+    profit: number(row.profit || row.total_profit),
+    cashRevenue: number(row.cashRevenue || row.cash_revenue),
+    transferRevenue: number(row.transferRevenue || row.transfer_revenue),
+    unassignedRevenue: number(row.unassignedRevenue || row.unassigned_revenue),
+    unitCounts: jsonArray(row.unitCounts || row.unit_counts).map((item) => {
+      const unit = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      return { unit: text(unit.unit), quantity: number(unit.quantity) };
+    }).filter((item) => item.unit),
+    topMenus: jsonArray(row.topMenus || row.top_menus).map((item) => {
+      const menu = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      return { itemId: text(menu.itemId || menu.item_id), name: text(menu.name), quantity: number(menu.quantity), revenue: number(menu.revenue) };
+    }).filter((item) => item.itemId || item.name)
+  };
+}
+
+function jsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function normalizeRecipes(

@@ -7,7 +7,8 @@ const SHEETS = {
   favorites: "Favorites",
   sales: "Sales",
   saleItems: "SaleItems",
-  dailyClosings: "DailyClosings"
+  dailyClosings: "DailyClosings",
+  monthlyArchives: "MonthlyArchives"
 };
 
 const DEFAULT_CATEGORIES = [
@@ -176,6 +177,11 @@ function setupSpreadsheet() {
       name: SHEETS.dailyClosings,
       headers: ["id", "business_date", "order_count", "item_count", "total_revenue", "total_cost", "total_profit", "note", "closed_at", "updated_at"],
       rows: []
+    },
+    {
+      name: SHEETS.monthlyArchives,
+      headers: ["id", "month_key", "order_count", "item_count", "total_revenue", "total_cost", "total_profit", "daily_json", "source_count", "source_hash", "status", "archived_at", "updated_at"],
+      rows: []
     }
   ];
 
@@ -263,6 +269,7 @@ function doPost(e) {
     if (action === "saveSale") return jsonResponse(saveSale(payload));
     if (action === "deleteSale") return jsonResponse(deleteSale(payload.id));
     if (action === "saveDailyClosing") return jsonResponse(saveDailyClosing(payload));
+    if (action === "archiveSalesMonth") return jsonResponse(archiveSalesMonth(payload.month_key));
     return jsonResponse({ ok: false, error: "Unknown action: " + action }, 404);
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error) }, 500);
@@ -312,6 +319,17 @@ function secureEqual(left, right) {
 }
 
 function getBootstrapData() {
+  const allSales = readObjects(SHEETS.sales);
+  const startDate = bootstrapSalesStartDate();
+  const sales = allSales.filter((sale) => cleanId(sale.sale_date) >= startDate);
+  const activeSaleIds = {};
+  sales.forEach((sale) => (activeSaleIds[cleanId(sale.id)] = true));
+  const archiveMonths = {};
+  const currentMonth = currentMonthKey();
+  allSales.forEach((sale) => {
+    const month = cleanId(sale.sale_date).slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(month) && month < currentMonth) archiveMonths[month] = true;
+  });
   return {
     ok: true,
     settings: readObjects(SHEETS.settings),
@@ -320,9 +338,11 @@ function getBootstrapData() {
     recipes: readObjects(SHEETS.recipes),
     recipeItems: readObjects(SHEETS.recipeItems),
     favorites: readObjects(SHEETS.favorites),
-    sales: readObjects(SHEETS.sales),
-    saleItems: readObjects(SHEETS.saleItems),
-    dailyClosings: readObjects(SHEETS.dailyClosings)
+    sales: sales,
+    saleItems: readObjects(SHEETS.saleItems).filter((item) => activeSaleIds[cleanId(item.sale_id)]),
+    dailyClosings: readObjects(SHEETS.dailyClosings).filter((closing) => cleanId(closing.business_date) >= startDate),
+    monthlyArchives: readObjects(SHEETS.monthlyArchives).filter((archive) => cleanId(archive.status) === "complete"),
+    archiveMonths: Object.keys(archiveMonths).sort().reverse()
   };
 }
 
@@ -772,6 +792,173 @@ function saveDailyClosing(payload) {
   dedupeObjectsById(SHEETS.dailyClosings, closing.id);
   const saved = saveObject(SHEETS.dailyClosings, closing);
   return { ok: true, closing: saved.item || closing };
+}
+
+function archiveSalesMonth(monthKey) {
+  monthKey = cleanId(monthKey);
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) throw new Error("รูปแบบเดือนไม่ถูกต้อง");
+  if (monthKey >= currentMonthKey()) throw new Error("จัดเก็บได้เฉพาะเดือนที่จบแล้ว");
+
+  const archives = readObjects(SHEETS.monthlyArchives);
+  const existing = archives.find((archive) => cleanId(archive.month_key) === monthKey);
+  const allSales = readObjects(SHEETS.sales);
+  const monthSales = allSales.filter((sale) => cleanId(sale.sale_date).slice(0, 7) === monthKey);
+  const saleIds = monthSales.map((sale) => cleanId(sale.id)).filter(Boolean).sort();
+  const sourceHash = hashSecret(saleIds.join("|"));
+
+  if (existing && cleanId(existing.status) === "complete") {
+    if (monthSales.length) throw new Error("เดือนนี้จัดเก็บแล้ว แต่พบยอดขายที่เพิ่มภายหลัง กรุณาตรวจข้อมูลในชีตก่อน");
+    return { ok: true, archive: existing, mode: "already_archived" };
+  }
+  if (existing && cleanId(existing.status) === "pending_cleanup") {
+    const originalCount = Number(existing.source_count || 0);
+    if (monthSales.length > originalCount || (monthSales.length === originalCount && cleanId(existing.source_hash) !== sourceHash)) {
+      throw new Error("ข้อมูลเดือนนี้เปลี่ยนระหว่างจัดเก็บ กรุณาตรวจชีต MonthlyArchives ก่อน");
+    }
+    removeArchivedSales(monthSales);
+    existing.status = "complete";
+    existing.updated_at = new Date().toISOString();
+    const resumed = saveObject(SHEETS.monthlyArchives, existing);
+    return { ok: true, archive: resumed.item || existing, mode: "cleanup_resumed" };
+  }
+  if (!monthSales.length) throw new Error("ไม่พบยอดขายของเดือนนี้");
+
+  const monthSaleIds = {};
+  saleIds.forEach((id) => (monthSaleIds[id] = true));
+  const monthItems = readObjects(SHEETS.saleItems).filter((item) => monthSaleIds[cleanId(item.sale_id)]);
+  const itemsBySale = {};
+  monthItems.forEach((item) => {
+    const saleId = cleanId(item.sale_id);
+    if (!itemsBySale[saleId]) itemsBySale[saleId] = [];
+    itemsBySale[saleId].push(item);
+  });
+
+  const daily = {};
+  monthSales.forEach((sale) => {
+    const date = cleanId(sale.sale_date);
+    if (!daily[date]) daily[date] = newArchiveDay(date);
+    const day = daily[date];
+    const saleItems = itemsBySale[cleanId(sale.id)] || [];
+    day.orderCount += 1;
+    day.revenue += Number(sale.total_revenue || 0);
+    day.cost += Number(sale.total_cost || 0);
+    day.profit += Number(sale.total_profit || 0);
+    const payment = normalizePaymentMethod(sale.payment_method);
+    if (payment === "เงินสด") day.cashRevenue += Number(sale.total_revenue || 0);
+    else if (payment) day.transferRevenue += Number(sale.total_revenue || 0);
+    else day.unassignedRevenue += Number(sale.total_revenue || 0);
+
+    saleItems.filter((item) => cleanId(item.kind) !== "topping" && !cleanId(item.parent_id)).forEach((item) => {
+      const qty = Math.max(0, Number(item.qty || 0));
+      day.itemCount += qty;
+      const key = cleanId(item.item_id) || cleanId(item.name);
+      if (!day._menus[key]) day._menus[key] = { itemId: key, name: cleanId(item.name), quantity: 0, revenue: 0 };
+      day._menus[key].quantity += qty;
+      day._menus[key].revenue += Number(item.line_revenue || 0);
+      if (cleanId(item.kind) !== "recipe") return;
+      const unit = normalizeCountUnit(item.count_unit);
+      if (unit) day._units[unit] = Number(day._units[unit] || 0) + qty;
+    });
+  });
+
+  const dailySummaries = Object.keys(daily).sort().map((date) => finalizeArchiveDay(daily[date]));
+  const archive = {
+    id: "archive_" + monthKey,
+    month_key: monthKey,
+    order_count: dailySummaries.reduce((sum, day) => sum + day.orderCount, 0),
+    item_count: dailySummaries.reduce((sum, day) => sum + day.itemCount, 0),
+    total_revenue: roundCurrency(dailySummaries.reduce((sum, day) => sum + day.revenue, 0)),
+    total_cost: roundCurrency(dailySummaries.reduce((sum, day) => sum + day.cost, 0)),
+    total_profit: roundCurrency(dailySummaries.reduce((sum, day) => sum + day.profit, 0)),
+    daily_json: JSON.stringify(dailySummaries),
+    source_count: monthSales.length,
+    source_hash: sourceHash,
+    status: "pending_cleanup",
+    archived_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  saveObject(SHEETS.monthlyArchives, archive);
+  removeArchivedSales(monthSales);
+  archive.status = "complete";
+  archive.updated_at = new Date().toISOString();
+  const saved = saveObject(SHEETS.monthlyArchives, archive);
+  return { ok: true, archive: saved.item || archive, mode: "archived" };
+}
+
+function newArchiveDay(date) {
+  return {
+    date: date,
+    orderCount: 0,
+    itemCount: 0,
+    revenue: 0,
+    cost: 0,
+    profit: 0,
+    cashRevenue: 0,
+    transferRevenue: 0,
+    unassignedRevenue: 0,
+    _units: {},
+    _menus: {}
+  };
+}
+
+function finalizeArchiveDay(day) {
+  const topMenus = Object.keys(day._menus).map((key) => day._menus[key])
+    .sort((left, right) => right.quantity - left.quantity || right.revenue - left.revenue)
+    .slice(0, 5);
+  return {
+    date: day.date,
+    orderCount: day.orderCount,
+    itemCount: day.itemCount,
+    revenue: roundCurrency(day.revenue),
+    cost: roundCurrency(day.cost),
+    profit: roundCurrency(day.profit),
+    cashRevenue: roundCurrency(day.cashRevenue),
+    transferRevenue: roundCurrency(day.transferRevenue),
+    unassignedRevenue: roundCurrency(day.unassignedRevenue),
+    unitCounts: Object.keys(day._units).map((unit) => ({ unit: unit, quantity: day._units[unit] })),
+    topMenus: topMenus
+  };
+}
+
+function removeArchivedSales(monthSales) {
+  const saleIds = {};
+  monthSales.forEach((sale) => (saleIds[cleanId(sale.id)] = true));
+  removeSheetRows(SHEETS.saleItems, "sale_id", saleIds);
+  removeSheetRows(SHEETS.sales, "id", saleIds);
+  const monthKey = cleanId(monthSales[0] && monthSales[0].sale_date).slice(0, 7);
+  const closingIds = {};
+  readObjects(SHEETS.dailyClosings).forEach((closing) => {
+    if (cleanId(closing.business_date).slice(0, 7) === monthKey) closingIds[cleanId(closing.id)] = true;
+  });
+  removeSheetRows(SHEETS.dailyClosings, "id", closingIds);
+}
+
+function removeSheetRows(sheetName, keyHeader, valuesToRemove) {
+  const sheet = getSheet(sheetName);
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return 0;
+  const headers = values[0];
+  const keyIndex = headers.indexOf(keyHeader);
+  if (keyIndex < 0) throw new Error("Missing header " + keyHeader + " in " + sheetName);
+  const kept = values.slice(1).filter((row) => !valuesToRemove[cleanId(row[keyIndex])]);
+  const removed = values.length - 1 - kept.length;
+  if (!removed) return 0;
+  sheet.getRange(2, 1, values.length - 1, headers.length).clearContent();
+  if (kept.length) sheet.getRange(2, 1, kept.length, headers.length).setValues(kept);
+  return removed;
+}
+
+function currentMonthKey() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM");
+}
+
+function bootstrapSalesStartDate() {
+  const now = new Date();
+  const sevenDayStart = new Date(now.getTime());
+  sevenDayStart.setDate(sevenDayStart.getDate() - 6);
+  const sevenDayKey = Utilities.formatDate(sevenDayStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  const monthStart = currentMonthKey() + "-01";
+  return sevenDayKey < monthStart ? sevenDayKey : monthStart;
 }
 
 function backfillCategoryCountUnits() {

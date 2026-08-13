@@ -42,6 +42,7 @@ import { DrinkArt } from "./components/DrinkArt";
 import { RecipeCard } from "./components/RecipeCard";
 import {
   authenticateAccessKey,
+  archiveSalesMonth as archiveSalesMonthOnSheet,
   clearStoredAccessKey,
   fetchAppData,
   fileToImagePayload,
@@ -64,7 +65,7 @@ import type { SyncState } from "./lib/syncQueue";
 import { getLocalQueueOrders, storeLocalQueueOrders } from "./lib/localQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
 import { calculateSaleRevenue } from "./lib/sales";
-import type { Category, CategoryId, DailyClosing, Ingredient, PaymentMethod, QueueAddon, QueueItem, QueueOrder, QueueStatus, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
+import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, QueueAddon, QueueItem, QueueOrder, QueueStatus, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
 type Screen = "main" | "detail" | "ingredientForm" | "recipeForm";
@@ -202,10 +203,13 @@ function App() {
   const [orderPromotionAmount, setOrderPromotionAmount] = useState(0);
   const [orderPaymentMethod, setOrderPaymentMethod] = useState<OrderPaymentMethodSelection>("");
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
+  const [orderTime, setOrderTime] = useState(() => formatTimeInput(new Date()));
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
   const [orderSearch, setOrderSearch] = useState("");
   const [sales, setSales] = useState<Sale[]>(cachedData?.sales || []);
   const [dailyClosings, setDailyClosings] = useState<DailyClosing[]>(cachedData?.dailyClosings || []);
+  const [monthlyArchives, setMonthlyArchives] = useState<MonthlyArchive[]>(cachedData?.monthlyArchives || []);
+  const [archiveMonths, setArchiveMonths] = useState<string[]>(cachedData?.archiveMonths || []);
   const [saleChannel, setSaleChannel] = useState("หน้าร้าน");
   const [salePaymentMethod, setSalePaymentMethod] = useState<PaymentMethodSelection>("");
   const [saleDate, setSaleDate] = useState(() => todayKey());
@@ -325,13 +329,15 @@ function App() {
     profit: saleRevenue.netRevenue - saleDraftTotals.cost
   };
 
-  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[] }, selectedId?: string) {
+  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[]; monthlyArchives?: MonthlyArchive[]; archiveMonths?: string[] }, selectedId?: string) {
     setCategoryList(data.categories);
     setSelectedCategory((current) => data.categories.some((category) => category.id === current) ? current : "all");
     setIngredientList(data.ingredients);
     setRecipes(data.recipes);
     setSales(data.sales || []);
     setDailyClosings(data.dailyClosings || []);
+    setMonthlyArchives(data.monthlyArchives || []);
+    setArchiveMonths(data.archiveMonths || []);
     setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current?.id)) || data.recipes[0] || null);
   }
 
@@ -429,7 +435,7 @@ function App() {
       const next = current.some((item) => item.id === recipe.id)
         ? current.map((item) => (item.id === recipe.id ? recipe : item))
         : [recipe, ...current];
-      cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: next, sales, dailyClosings });
+      cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: next, sales, dailyClosings, monthlyArchives, archiveMonths });
       return next;
     });
     setSelectedRecipe(recipe);
@@ -439,7 +445,7 @@ function App() {
     setCategoryList(nextCategories);
     setRecipes(nextRecipes);
     setSelectedRecipe((current) => current ? nextRecipes.find((recipe) => recipe.id === current.id) || nextRecipes[0] || null : nextRecipes[0] || null);
-    cacheAppData({ categories: nextCategories, ingredients: ingredientList, recipes: nextRecipes, sales, dailyClosings });
+    cacheAppData({ categories: nextCategories, ingredients: ingredientList, recipes: nextRecipes, sales, dailyClosings, monthlyArchives, archiveMonths });
   }
 
   async function saveManagedCategory(category: Category) {
@@ -535,14 +541,14 @@ function App() {
       ? ingredientList.map((item) => (item.id === ingredient.id ? ingredient : item))
       : [ingredient, ...ingredientList];
     setIngredientList(nextIngredients);
-    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes, sales, dailyClosings });
+    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes, sales, dailyClosings, monthlyArchives, archiveMonths });
   }
 
   function removeRecipeLocally(recipeId: string) {
     const nextRecipes = recipes.filter((recipe) => recipe.id !== recipeId);
     setRecipes(nextRecipes);
     setSelectedRecipe((current) => (current?.id === recipeId ? nextRecipes[0] || null : current));
-    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: nextRecipes, sales, dailyClosings });
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes: nextRecipes, sales, dailyClosings, monthlyArchives, archiveMonths });
   }
 
   function removeIngredientLocally(ingredientId: string) {
@@ -561,7 +567,7 @@ function App() {
           }
         : null
     );
-    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes: nextRecipes, sales, dailyClosings });
+    cacheAppData({ categories: categoryList, ingredients: nextIngredients, recipes: nextRecipes, sales, dailyClosings, monthlyArchives, archiveMonths });
   }
 
   function openRecipe(recipe: Recipe) {
@@ -717,7 +723,7 @@ function App() {
   function storeSalesLocally(nextSales: Sale[], nextClosings = dailyClosings) {
     setSales(nextSales);
     setDailyClosings(nextClosings);
-    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales: nextSales, dailyClosings: nextClosings });
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales: nextSales, dailyClosings: nextClosings, monthlyArchives, archiveMonths });
   }
 
   async function refreshExistingClosings(dates: string[], nextSales: Sale[]) {
@@ -803,7 +809,7 @@ function App() {
       ? dailyClosings.map((item) => (item.id === closing.id ? closing : item))
       : [closing, ...dailyClosings];
     setDailyClosings(nextClosings);
-    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales, dailyClosings: nextClosings });
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales, dailyClosings: nextClosings, monthlyArchives, archiveMonths });
   }
 
   async function submitSale() {
@@ -905,6 +911,47 @@ function App() {
     }
   }
 
+  async function archiveSalesMonth(monthKey: string) {
+    setSaving(true);
+    setMessage("");
+    try {
+      const syncResult = await flushSyncQueue();
+      if (syncResult.unauthorized) {
+        lockApp();
+        throw new Error("กรุณาใส่รหัสลับอีกครั้ง");
+      }
+      if (syncResult.pending > 0) throw new Error(syncResult.error || "ยังมีข้อมูลรอซิงก์ กรุณาลองใหม่อีกครั้ง");
+      const archive = await archiveSalesMonthOnSheet(monthKey);
+      const nextArchives = monthlyArchives.some((item) => item.monthKey === archive.monthKey)
+        ? monthlyArchives.map((item) => (item.monthKey === archive.monthKey ? archive : item))
+        : [archive, ...monthlyArchives];
+      const nextSales = sales.filter((sale) => !sale.saleDate.startsWith(`${monthKey}-`));
+      const nextClosings = dailyClosings.filter((closing) => !closing.businessDate.startsWith(`${monthKey}-`));
+      const nextArchiveMonths = archiveMonths.filter((month) => month !== monthKey);
+      setMonthlyArchives(nextArchives);
+      setArchiveMonths(nextArchiveMonths);
+      setSales(nextSales);
+      setDailyClosings(nextClosings);
+      cacheAppData({
+        categories: categoryList,
+        ingredients: ingredientList,
+        recipes,
+        sales: nextSales,
+        dailyClosings: nextClosings,
+        monthlyArchives: nextArchives,
+        archiveMonths: nextArchiveMonths
+      });
+      setMessage(`จัดเก็บข้อมูลเดือน ${formatMonthLabel(monthKey)} แล้ว`);
+      return archive;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "จัดเก็บข้อมูลรายเดือนไม่สำเร็จ";
+      setMessage(message);
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function storeQueuesLocally(nextQueues: QueueOrder[]) {
     const sorted = nextQueues.slice().sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     storeLocalQueueOrders(sorted);
@@ -943,7 +990,7 @@ function App() {
     }
     setMessage("");
     if (!orderNumber.trim()) setOrderNumber(makeOrderNumber());
-    setOrderPrintedAt(new Date());
+    setOrderPrintedAt(orderDateWithTime(orderTime));
     setReceiptPreviewOpen(true);
   }
 
@@ -1298,6 +1345,7 @@ function App() {
                   items={orderItems}
                   note={orderNote}
                   orderNumber={orderNumber}
+                  orderTime={orderTime}
                   paymentMethod={orderPaymentMethod}
                   promotionAmount={orderPromotionAmount}
                   promotionName={orderPromotionName}
@@ -1313,10 +1361,12 @@ function App() {
                     setOrderPaymentMethod("");
                     setOrderPromotionName("");
                     setOrderPromotionAmount(0);
+                    setOrderTime(formatTimeInput(new Date()));
                   }}
                   onCustomerName={setOrderCustomerName}
                   onNote={setOrderNote}
                   onOrderNumber={setOrderNumber}
+                  onOrderTime={setOrderTime}
                   onPaymentMethod={setOrderPaymentMethod}
                   onPromotionAmount={setOrderPromotionAmount}
                   onPromotionName={setOrderPromotionName}
@@ -1329,6 +1379,7 @@ function App() {
                 />
               ) : tab === "sales" ? (
                 <SalesScreen
+                  archiveMonths={archiveMonths}
                   categories={categoryList}
                   channels={["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"]}
                   channel={saleChannel}
@@ -1336,6 +1387,7 @@ function App() {
                   date={saleDate}
                   ingredients={ingredientList}
                   items={saleItems}
+                  monthlyArchives={monthlyArchives}
                   note={saleNote}
                   paymentMethod={salePaymentMethod}
                   promotionAmount={salePromotionAmount}
@@ -1348,6 +1400,7 @@ function App() {
                   editingSaleId={editingSaleId}
                   onAddRecipe={addSaleRecipe}
                   onAddTopping={addSaleTopping}
+                  onArchiveMonth={archiveSalesMonth}
                   onChannel={setSaleChannel}
                   onCancelEdit={resetSaleEditor}
                   onClear={resetSaleEditor}
@@ -2365,6 +2418,7 @@ function OrderScreen({
   items,
   note,
   orderNumber,
+  orderTime,
   paymentMethod,
   promotionAmount,
   promotionName,
@@ -2379,6 +2433,7 @@ function OrderScreen({
   onCustomerName,
   onNote,
   onOrderNumber,
+  onOrderTime,
   onPaymentMethod,
   onPromotionAmount,
   onPromotionName,
@@ -2395,6 +2450,7 @@ function OrderScreen({
   items: OrderItem[];
   note: string;
   orderNumber: string;
+  orderTime: string;
   paymentMethod: OrderPaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
@@ -2409,6 +2465,7 @@ function OrderScreen({
   onCustomerName: (name: string) => void;
   onNote: (note: string) => void;
   onOrderNumber: (value: string) => void;
+  onOrderTime: (value: string) => void;
   onPaymentMethod: (value: OrderPaymentMethodSelection) => void;
   onPromotionAmount: (value: number) => void;
   onPromotionName: (value: string) => void;
@@ -2449,6 +2506,10 @@ function OrderScreen({
         <label>
           ชื่อลูกค้า
           <input onChange={(event) => onCustomerName(event.currentTarget.value)} placeholder="เช่น พลอย" value={customerName} />
+        </label>
+        <label>
+          เวลาออเดอร์
+          <input onChange={(event) => onOrderTime(event.currentTarget.value)} type="time" value={orderTime} />
         </label>
         <div className="order-channel-row">
           {channels.map((item) => (
@@ -2754,6 +2815,7 @@ function PromotionEditor({
 }
 
 function SalesScreen({
+  archiveMonths,
   categories,
   channels,
   channel,
@@ -2761,6 +2823,7 @@ function SalesScreen({
   date,
   ingredients,
   items,
+  monthlyArchives,
   note,
   paymentMethod,
   promotionAmount,
@@ -2773,6 +2836,7 @@ function SalesScreen({
   editingSaleId,
   onAddRecipe,
   onAddTopping,
+  onArchiveMonth,
   onCancelEdit,
   onChannel,
   onClear,
@@ -2789,6 +2853,7 @@ function SalesScreen({
   onSubmit,
   onUpdateItem
 }: {
+  archiveMonths: string[];
   categories: Category[];
   channels: string[];
   channel: string;
@@ -2796,6 +2861,7 @@ function SalesScreen({
   date: string;
   ingredients: Ingredient[];
   items: SaleDraftItem[];
+  monthlyArchives: MonthlyArchive[];
   note: string;
   paymentMethod: PaymentMethodSelection;
   promotionAmount: number;
@@ -2808,6 +2874,7 @@ function SalesScreen({
   editingSaleId: string | null;
   onAddRecipe: (recipe: Recipe) => void;
   onAddTopping: (parentId: string, ingredient: Ingredient) => void;
+  onArchiveMonth: (monthKey: string) => Promise<MonthlyArchive>;
   onCancelEdit: () => void;
   onChannel: (channel: string) => void;
   onClear: () => void;
@@ -3068,7 +3135,17 @@ function SalesScreen({
           {existingClosing ? "อัปเดตยอดปิดร้าน" : "บันทึกปิดร้าน"}
         </button>
       </section>
-      <ClosingReport categories={categories} closings={closings} onDelete={onDeleteSale} onEdit={onEditSale} recipes={recipes} sales={sales} />
+      <ClosingReport
+        archiveMonths={archiveMonths}
+        categories={categories}
+        closings={closings}
+        monthlyArchives={monthlyArchives}
+        onArchiveMonth={onArchiveMonth}
+        onDelete={onDeleteSale}
+        onEdit={onEditSale}
+        recipes={recipes}
+        sales={sales}
+      />
     </>
   );
 }
@@ -3162,15 +3239,21 @@ function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) =
 }
 
 function ClosingReport({
+  archiveMonths,
   categories,
   closings,
+  monthlyArchives,
+  onArchiveMonth,
   onDelete,
   onEdit,
   recipes,
   sales
 }: {
+  archiveMonths: string[];
   categories: Category[];
   closings: DailyClosing[];
+  monthlyArchives: MonthlyArchive[];
+  onArchiveMonth: (monthKey: string) => Promise<MonthlyArchive>;
   onDelete: (sale: Sale) => void;
   onEdit: (sale: Sale) => void;
   recipes: Recipe[];
@@ -3181,6 +3264,8 @@ function ClosingReport({
   const [customEnd, setCustomEnd] = useState(() => todayKey());
   const [topMenuMode, setTopMenuMode] = useState<TopSellingMenuMode>("week");
   const [topMenuOpen, setTopMenuOpen] = useState(false);
+  const [selectedArchiveMonth, setSelectedArchiveMonth] = useState(() => archiveMonths[0] || "");
+  const [archivingMonth, setArchivingMonth] = useState(false);
   useEffect(() => {
     if (!topMenuOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -3189,8 +3274,11 @@ function ClosingReport({
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [topMenuOpen]);
+  useEffect(() => {
+    if (!selectedArchiveMonth || !archiveMonths.includes(selectedArchiveMonth)) setSelectedArchiveMonth(archiveMonths[0] || "");
+  }, [archiveMonths, selectedArchiveMonth]);
   const reportRange = getReportDateRange(todayKey(), mode, customStart, customEnd);
-  const reportRows = getSalesReportRows(sales, reportRange.start, reportRange.end);
+  const reportRows = getSalesReportRows(sales, reportRange.start, reportRange.end, monthlyArchives);
   const totals = reportRows.reduce(
     (sum, row) => ({
       revenue: sum.revenue + row.revenue,
@@ -3215,10 +3303,26 @@ function ClosingReport({
       sales: sales.filter((sale) => sale.saleDate === row.date).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     }));
   const closedDates = new Set(closings.map((closing) => closing.businessDate));
+  const archivedDates = new Set(monthlyArchives.flatMap((archive) => archive.dailySummaries.map((day) => day.date)));
   const rangeLabel = mode === "week" ? "7 วันล่าสุด" : mode === "month" ? "เดือนนี้" : `${formatThaiDate(reportRange.start)} – ${formatThaiDate(reportRange.end)}`;
   const topMenuRange = getReportDateRange(todayKey(), topMenuMode, "", "");
-  const topSellingMenus = getTopSellingMenus(sales, topMenuRange.start, topMenuRange.end);
-  const unitCounts = getSalesUnitCounts(sales, reportRange.start, reportRange.end, recipes, categories);
+  const topSellingMenus = getTopSellingMenus(sales, topMenuRange.start, topMenuRange.end, monthlyArchives);
+  const unitCounts = getSalesUnitCounts(sales, reportRange.start, reportRange.end, recipes, categories, monthlyArchives);
+
+  async function createMonthlyArchive() {
+    if (!selectedArchiveMonth || archivingMonth) return;
+    const label = formatMonthLabel(selectedArchiveMonth);
+    if (!window.confirm(`จัดเก็บเดือน ${label} เป็นสรุปรายเดือนใช่ไหม? หลังจัดเก็บจะดูและแก้ไขรายการขายทีละรายการของเดือนนี้ไม่ได้`)) return;
+    setArchivingMonth(true);
+    try {
+      const archive = await onArchiveMonth(selectedArchiveMonth);
+      await downloadMonthlyArchivePdf(archive);
+    } catch {
+      // The parent action already exposes the backend error in the app status.
+    } finally {
+      setArchivingMonth(false);
+    }
+  }
 
   return (
     <section className="closing-panel closing-report">
@@ -3337,7 +3441,7 @@ function ClosingReport({
               <summary>
                 <span>
                   <strong>{formatThaiDate(daySummary.date)}</strong>
-                  <small>{daySummary.orderCount} ครั้ง · {daySummary.itemCount} เมนู{closedDates.has(daySummary.date) ? " · ปิดร้านแล้ว" : ""}</small>
+                  <small>{daySummary.orderCount} ครั้ง · {daySummary.itemCount} เมนู{archivedDates.has(daySummary.date) ? " · จัดเก็บแล้ว" : closedDates.has(daySummary.date) ? " · ปิดร้านแล้ว" : ""}</small>
                 </span>
                 <ChevronDown size={16} />
                 <div className="day-history-metrics">
@@ -3355,12 +3459,45 @@ function ClosingReport({
               </summary>
               <div className="day-history-entry__body">
                 {row.sales.map((sale) => <SaleHistoryEntry key={sale.id} onDelete={onDelete} onEdit={onEdit} sale={sale} />)}
+                {!row.sales.length ? <p className="empty-text">ข้อมูลเดือนนี้จัดเก็บแล้ว จึงแสดงเฉพาะยอดสรุปรายวัน</p> : null}
               </div>
             </details>
           );
         })}
         {!rangeHistory.length ? <p className="empty-text">ยังไม่มีประวัติการขายในช่วงนี้</p> : null}
       </div>
+      <details className="monthly-archive-panel">
+        <summary>
+          <span><strong>จัดเก็บข้อมูลรายเดือน</strong><small>ลดข้อมูลในชีตและสร้าง PDF</small></span>
+          <ChevronDown size={17} />
+        </summary>
+        <div className="monthly-archive-panel__body">
+          {archiveMonths.length ? (
+            <div className="monthly-archive-create">
+              <label>
+                เดือนที่จบแล้ว
+                <select onChange={(event) => setSelectedArchiveMonth(event.currentTarget.value)} value={selectedArchiveMonth}>
+                  {archiveMonths.map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
+                </select>
+              </label>
+              <button disabled={archivingMonth || !selectedArchiveMonth} onClick={() => void createMonthlyArchive()} type="button">
+                {archivingMonth ? "กำลังจัดเก็บ..." : "สร้าง PDF และจัดเก็บ"}
+              </button>
+            </div>
+          ) : <p className="empty-text">ยังไม่มีเดือนที่ต้องจัดเก็บ</p>}
+          {monthlyArchives.length ? (
+            <div className="monthly-archive-list">
+              <strong>จัดเก็บแล้ว</strong>
+              {monthlyArchives.slice().sort((a, b) => b.monthKey.localeCompare(a.monthKey)).map((archive) => (
+                <div key={archive.id}>
+                  <span><strong>{formatMonthLabel(archive.monthKey)}</strong><small>{archive.orderCount} ครั้ง · กำไร {money(archive.totalProfit)} บาท</small></span>
+                  <button onClick={() => void downloadMonthlyArchivePdf(archive)} type="button">PDF</button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </details>
       {topMenuOpen ? (
         <div className="top-menu-sheet-layer">
           <button aria-label="ปิดสถิติเมนูขายดี" className="top-menu-sheet-backdrop" onClick={() => setTopMenuOpen(false)} type="button" />
@@ -4407,6 +4544,21 @@ function makeOrderNumber() {
   return `#BH-${padNumber(now.getHours())}${padNumber(now.getMinutes())}${padNumber(now.getSeconds())}`;
 }
 
+function formatTimeInput(date: Date) {
+  return `${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
+}
+
+function orderDateWithTime(value: string) {
+  const date = new Date();
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return date;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return date;
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
 function formatReceiptDate(date: Date) {
   return `${padNumber(date.getDate())}/${padNumber(date.getMonth() + 1)}/${date.getFullYear()} ${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
 }
@@ -4466,12 +4618,18 @@ function localDateKey(value?: string | Date) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-function getSalesReportRows(sales: Sale[], startDate: string, endDate: string) {
+function getSalesReportRows(sales: Sale[], startDate: string, endDate: string, archives: MonthlyArchive[] = []) {
+  const summaries = new Map<string, SalesSummary>();
   const dates = Array.from(new Set(sales.filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate).map((sale) => sale.saleDate)));
-  return dates.sort().map((date) => summarizeSales(sales, date));
+  dates.forEach((date) => summaries.set(date, summarizeSales(sales, date)));
+  getArchivedDays(archives, startDate, endDate).forEach((day) => {
+    const archivedSummary = archiveDayToSalesSummary(day);
+    summaries.set(day.date, mergeSalesSummaries(summaries.get(day.date), archivedSummary));
+  });
+  return Array.from(summaries.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
-function getTopSellingMenus(sales: Sale[], startDate: string, endDate: string): TopSellingMenu[] {
+function getTopSellingMenus(sales: Sale[], startDate: string, endDate: string, archives: MonthlyArchive[] = []): TopSellingMenu[] {
   const menus = new Map<string, TopSellingMenu>();
   sales
     .filter((sale) => sale.saleDate >= startDate && sale.saleDate <= endDate)
@@ -4486,6 +4644,15 @@ function getTopSellingMenus(sales: Sale[], startDate: string, endDate: string): 
           menus.set(key, current);
         });
     });
+  getArchivedDays(archives, startDate, endDate).forEach((day) => {
+    day.topMenus.forEach((item) => {
+      const key = item.itemId || item.name;
+      const current = menus.get(key) || { itemId: key, name: item.name, quantity: 0, revenue: 0 };
+      current.quantity += item.quantity;
+      current.revenue += item.revenue;
+      menus.set(key, current);
+    });
+  });
   return Array.from(menus.values())
     .sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue || a.name.localeCompare(b.name, "th"))
     .slice(0, 5);
@@ -4496,7 +4663,8 @@ function getSalesUnitCounts(
   startDate: string,
   endDate: string,
   recipes: Recipe[],
-  categories: Category[]
+  categories: Category[],
+  archives: MonthlyArchive[] = []
 ) {
   const counts = new Map<string, number>();
   const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
@@ -4519,8 +4687,44 @@ function getSalesUnitCounts(
           counts.set(unit, (counts.get(unit) || 0) + item.qty);
         });
     });
+  getArchivedDays(archives, startDate, endDate).forEach((day) => {
+    day.unitCounts.forEach((item) => counts.set(item.unit, (counts.get(item.unit) || 0) + item.quantity));
+  });
   return Array.from(counts, ([unit, quantity]) => ({ unit, quantity }))
     .sort((left, right) => right.quantity - left.quantity || left.unit.localeCompare(right.unit, "th"));
+}
+
+function getArchivedDays(archives: MonthlyArchive[], startDate: string, endDate: string) {
+  return archives.flatMap((archive) => archive.dailySummaries).filter((day) => day.date >= startDate && day.date <= endDate);
+}
+
+function archiveDayToSalesSummary(day: MonthlyArchiveDay): SalesSummary {
+  return {
+    date: day.date,
+    orderCount: day.orderCount,
+    itemCount: day.itemCount,
+    revenue: day.revenue,
+    cost: day.cost,
+    profit: day.profit,
+    cashRevenue: day.cashRevenue,
+    transferRevenue: day.transferRevenue,
+    unassignedRevenue: day.unassignedRevenue
+  };
+}
+
+function mergeSalesSummaries(left: SalesSummary | undefined, right: SalesSummary): SalesSummary {
+  if (!left) return right;
+  return {
+    date: right.date,
+    orderCount: left.orderCount + right.orderCount,
+    itemCount: left.itemCount + right.itemCount,
+    revenue: left.revenue + right.revenue,
+    cost: left.cost + right.cost,
+    profit: left.profit + right.profit,
+    cashRevenue: left.cashRevenue + right.cashRevenue,
+    transferRevenue: left.transferRevenue + right.transferRevenue,
+    unassignedRevenue: left.unassignedRevenue + right.unassignedRevenue
+  };
 }
 
 function calculateQueueTotal(queue: QueueOrder, recipes: Recipe[], ingredients: Ingredient[]) {
@@ -4618,6 +4822,99 @@ function formatThaiDate(value: string) {
   const date = parseDateKey(value);
   if (!date) return value;
   return date.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formatMonthLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  return new Date(Number(match[1]), Number(match[2]) - 1, 1).toLocaleDateString("th-TH", { month: "long", year: "numeric" });
+}
+
+async function downloadMonthlyArchivePdf(archive: MonthlyArchive) {
+  const width = 1240;
+  const rowHeight = 88;
+  const height = 430 + Math.max(1, archive.dailySummaries.length) * rowHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("สร้างรายงาน PDF ไม่สำเร็จ");
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#111111";
+  context.textBaseline = "alphabetic";
+  context.textAlign = "center";
+  context.font = '700 42px Tahoma, "Noto Sans Thai", sans-serif';
+  context.fillText("สรุปยอดขายรายเดือน", width / 2, 72);
+  context.font = '700 34px Tahoma, "Noto Sans Thai", sans-serif';
+  context.fillText(formatMonthLabel(archive.monthKey), width / 2, 122);
+  context.font = '400 21px Tahoma, "Noto Sans Thai", sans-serif';
+  context.fillStyle = "#555555";
+  context.fillText(`จัดเก็บเมื่อ ${formatReceiptDate(new Date(archive.archivedAt))}`, width / 2, 160);
+
+  const summaryItems = [
+    ["จำนวนออเดอร์", `${archive.orderCount} ครั้ง`],
+    ["ยอดขายสุทธิ", `${money(archive.totalRevenue)} บาท`],
+    ["ต้นทุน", `${money(archive.totalCost)} บาท`],
+    ["กำไร", `${money(archive.totalProfit)} บาท`]
+  ];
+  summaryItems.forEach(([label, value], index) => {
+    const cardWidth = 270;
+    const x = 50 + index * 295;
+    context.fillStyle = "#f3f7f0";
+    context.fillRect(x, 190, cardWidth, 105);
+    context.textAlign = "left";
+    context.fillStyle = "#687064";
+    context.font = '400 19px Tahoma, "Noto Sans Thai", sans-serif';
+    context.fillText(label, x + 18, 226);
+    context.fillStyle = "#247b16";
+    context.font = '700 25px Tahoma, "Noto Sans Thai", sans-serif';
+    context.fillText(value, x + 18, 266);
+  });
+
+  const columns = [50, 230, 385, 555, 735, 915, 1090];
+  context.fillStyle = "#111111";
+  context.fillRect(50, 330, 1140, 48);
+  context.fillStyle = "#ffffff";
+  context.font = '700 18px Tahoma, "Noto Sans Thai", sans-serif';
+  context.textAlign = "left";
+  ["วันที่", "จำนวน", "หน่วยขาย", "ยอดขาย", "ต้นทุน", "กำไร"].forEach((label, index) => context.fillText(label, columns[index] + 10, 361));
+
+  archive.dailySummaries.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach((day, index) => {
+    const top = 378 + index * rowHeight;
+    if (index % 2 === 0) {
+      context.fillStyle = "#f8faf7";
+      context.fillRect(50, top, 1140, rowHeight);
+    }
+    context.fillStyle = "#222222";
+    context.font = '400 19px Tahoma, "Noto Sans Thai", sans-serif';
+    const units = day.unitCounts.length ? day.unitCounts.map((item) => `${formatRecipeAmount(item.quantity)} ${item.unit}`).join(", ") : "-";
+    const values = [formatThaiDate(day.date), `${day.orderCount} ครั้ง`, units, money(day.revenue), money(day.cost), money(day.profit)];
+    values.forEach((value, column) => context.fillText(value, columns[column] + 10, top + 36));
+    context.fillStyle = "#777777";
+    context.font = '400 16px Tahoma, "Noto Sans Thai", sans-serif';
+    context.fillText(`${day.itemCount} เมนู`, columns[1] + 10, top + 64);
+  });
+
+  const { jsPDF } = await import("jspdf");
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
+  const pageWidthMm = 190;
+  const pageHeightMm = 277;
+  const sliceHeight = Math.floor((canvas.width * pageHeightMm) / pageWidthMm);
+  for (let offset = 0, page = 0; offset < canvas.height; offset += sliceHeight, page += 1) {
+    const currentHeight = Math.min(sliceHeight, canvas.height - offset);
+    const slice = document.createElement("canvas");
+    slice.width = canvas.width;
+    slice.height = currentHeight;
+    const sliceContext = slice.getContext("2d");
+    if (!sliceContext) continue;
+    sliceContext.drawImage(canvas, 0, offset, canvas.width, currentHeight, 0, 0, canvas.width, currentHeight);
+    if (page > 0) pdf.addPage();
+    const renderedHeight = (currentHeight / canvas.width) * pageWidthMm;
+    pdf.addImage(slice.toDataURL("image/png"), "PNG", 10, 10, pageWidthMm, renderedHeight, undefined, "FAST");
+  }
+  pdf.save(`sales-summary-${archive.monthKey}.pdf`);
 }
 
 function formatSaleTime(value: string) {

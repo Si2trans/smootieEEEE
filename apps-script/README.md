@@ -18,6 +18,11 @@
 - `Sales`
 - `SaleItems`
 - `DailyClosings`
+- `MonthlyArchives`
+
+หลังอัปเดต `Code.gs` ให้รัน `setupSpreadsheet()` หนึ่งครั้ง ระบบจะเพิ่มชีตและหัวตารางที่ขาดโดยไม่ลบข้อมูลเดิม จากนั้น deploy Web App เป็นเวอร์ชันใหม่
+
+การจัดเก็บรายเดือนทำจากหน้า `ขาย > ภาพรวมยอดขาย > จัดเก็บข้อมูลรายเดือน` โดยทำได้เฉพาะเดือนที่จบแล้ว ระบบจะบันทึกสรุปรายวันลง `MonthlyArchives` ก่อน แล้วจึงลบรายการดิบของเดือนนั้นจาก `Sales`, `SaleItems` และ `DailyClosings`
 
 ตัวอย่าง API:
 
@@ -30,6 +35,7 @@ POST /exec?action=calculateCost
 POST /exec?action=uploadRecipeImage
 POST /exec?action=saveSale
 POST /exec?action=saveDailyClosing
+POST /exec?action=archiveSalesMonth
 ```
 
 ถ้าจะอัปโหลดรูปผ่าน Google Drive ให้สร้างโฟลเดอร์รูป แล้วตั้ง Script Property:

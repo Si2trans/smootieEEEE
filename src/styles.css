@@ -3912,6 +3912,119 @@ p {
   gap: 7px;
 }
 
+.monthly-archive-panel {
+  margin-top: 14px;
+  border: 1px solid #e2e8de;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.monthly-archive-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.monthly-archive-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.monthly-archive-panel > summary span,
+.monthly-archive-list > div span {
+  display: grid;
+  gap: 2px;
+}
+
+.monthly-archive-panel > summary small,
+.monthly-archive-list small {
+  color: #778174;
+  font-size: 12px;
+}
+
+.monthly-archive-panel[open] > summary svg {
+  transform: rotate(180deg);
+}
+
+.monthly-archive-panel__body {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
+  border-top: 1px solid #edf0ea;
+}
+
+.monthly-archive-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding-top: 14px;
+}
+
+.monthly-archive-create label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.monthly-archive-create select {
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #dce4d8;
+  border-radius: 8px;
+  background: #f8faf7;
+  color: #172014;
+  font: inherit;
+}
+
+.monthly-archive-create button,
+.monthly-archive-list button {
+  height: 42px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #278914;
+  color: #fff;
+  font-weight: 700;
+}
+
+.monthly-archive-create button:disabled {
+  opacity: .55;
+}
+
+.monthly-archive-list {
+  display: grid;
+  gap: 8px;
+}
+
+.monthly-archive-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f5f8f3;
+}
+
+.monthly-archive-list button {
+  height: 34px;
+  background: #e7f2e2;
+  color: #247b16;
+}
+
+@media (max-width: 390px) {
+  .monthly-archive-create {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sale-history-entry,
 .day-history-entry {
   border: 1px solid #edf0ea;
