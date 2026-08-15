@@ -207,6 +207,8 @@ function App() {
   const [orderNumber, setOrderNumber] = useState(() => makeOrderNumber());
   const [orderTime, setOrderTime] = useState(() => formatTimeInput(new Date()));
   const [orderPrintedAt, setOrderPrintedAt] = useState(() => new Date());
+  const [receiptOrderNumber, setReceiptOrderNumber] = useState(orderNumber);
+  const [receiptBagLabelCount, setReceiptBagLabelCount] = useState(0);
   const [orderSearch, setOrderSearch] = useState("");
   const [sales, setSales] = useState<Sale[]>(cachedData?.sales || []);
   const [dailyClosings, setDailyClosings] = useState<DailyClosing[]>(cachedData?.dailyClosings || []);
@@ -1026,7 +1028,11 @@ function App() {
       return;
     }
     setMessage("");
-    if (!orderNumber.trim()) setOrderNumber(makeOrderNumber());
+    const enteredOrderNumber = orderNumber.trim() || makeOrderNumber();
+    const nextOrderNumber = enteredOrderNumber.startsWith("#") ? enteredOrderNumber : `#${enteredOrderNumber}`;
+    if (orderNumber !== nextOrderNumber) setOrderNumber(nextOrderNumber);
+    setReceiptOrderNumber(nextOrderNumber);
+    setReceiptBagLabelCount(0);
     setOrderPrintedAt(orderDateWithTime(orderTime));
     setReceiptPreviewOpen(true);
   }
@@ -1066,7 +1072,7 @@ function App() {
       const { dataUrl } = await renderReceiptImage();
       const link = document.createElement("a");
       link.href = dataUrl;
-      link.download = `receipt-${sanitizeFileName(orderNumber.trim() || makeOrderNumber())}.png`;
+      link.download = `receipt-${sanitizeFileName(receiptOrderNumber)}.png`;
       link.click();
     } catch (error) {
       console.error(error);
@@ -1091,7 +1097,7 @@ function App() {
         format: [paperWidthMm, paperHeightMm]
       });
       pdf.addImage(dataUrl, "PNG", 0, 0, paperWidthMm, paperHeightMm);
-      pdf.save(`receipt-${sanitizeFileName(orderNumber.trim() || makeOrderNumber())}.pdf`);
+      pdf.save(`receipt-${sanitizeFileName(receiptOrderNumber)}.pdf`);
     } catch (error) {
       console.error(error);
       setMessage("สร้าง PDF ไม่สำเร็จ ลองเปิดบิลใหม่อีกครั้ง");
@@ -1497,6 +1503,7 @@ function App() {
             </main>
             <BottomNav active={tab} onAdd={startAddRecipe} onChange={setTab} />
             <OrderReceipt
+              bagLabelCount={receiptBagLabelCount}
               channel={orderChannel}
               customerName={orderCustomerName}
               isGeneratingImage={generatingReceiptImage}
@@ -1509,7 +1516,8 @@ function App() {
               onClose={() => setReceiptPreviewOpen(false)}
               onExportImage={exportReceiptImage}
               onExportPdf={exportReceiptPdf}
-              orderNumber={orderNumber.trim() || makeOrderNumber()}
+              onBagLabelCount={setReceiptBagLabelCount}
+              orderNumber={receiptOrderNumber}
               previewOpen={receiptPreviewOpen}
               printedAt={orderPrintedAt}
               receiptRef={receiptPaperRef}
@@ -3576,6 +3584,7 @@ function ClosingReport({
 }
 
 function OrderReceipt({
+  bagLabelCount,
   channel,
   customerName,
   isGeneratingImage,
@@ -3588,6 +3597,7 @@ function OrderReceipt({
   onClose,
   onExportImage,
   onExportPdf,
+  onBagLabelCount,
   orderNumber,
   previewOpen,
   printedAt,
@@ -3597,6 +3607,7 @@ function OrderReceipt({
   grossTotal,
   total
 }: {
+  bagLabelCount: number;
   channel: string;
   customerName: string;
   isGeneratingImage: boolean;
@@ -3609,6 +3620,7 @@ function OrderReceipt({
   onClose: () => void;
   onExportImage: () => void;
   onExportPdf: () => void;
+  onBagLabelCount: (count: number) => void;
   orderNumber: string;
   previewOpen: boolean;
   printedAt: Date;
@@ -3734,6 +3746,26 @@ function OrderReceipt({
               </select>
             </label>
           </div>
+          <div className="receipt-bag-label-control">
+            <div>
+              <strong>ป้ายเลขออเดอร์</strong>
+              <span>ต่อท้ายบิลสำหรับติดถุง</span>
+            </div>
+            <div className="receipt-bag-label-stepper" aria-label="จำนวนป้ายเลขออเดอร์">
+              <button
+                aria-label="ลดจำนวนป้าย"
+                disabled={bagLabelCount === 0}
+                onClick={() => onBagLabelCount(Math.max(0, bagLabelCount - 1))}
+                type="button"
+              >−</button>
+              <strong>{bagLabelCount}</strong>
+              <button
+                aria-label="เพิ่มจำนวนป้าย"
+                onClick={() => onBagLabelCount(Math.min(10, bagLabelCount + 1))}
+                type="button"
+              >+</button>
+            </div>
+          </div>
         </div>
       ) : null}
       <div
@@ -3812,6 +3844,14 @@ function OrderReceipt({
           </>
         ) : null}
         <div className="receipt-thanks">ขอบคุณที่อุดหนุน</div>
+        {Array.from({ length: bagLabelCount }, (_, index) => (
+          <div key={`bag-label-${index}`}>
+            <div className="receipt-bag-cut-line"><span>ตัดตรงนี้</span></div>
+            <section className="receipt-bag-label" aria-label={`ป้ายเลขออเดอร์ ${index + 1}`}>
+              {orderNumber}
+            </section>
+          </div>
+        ))}
       </div>
     </div>
   );
