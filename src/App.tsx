@@ -3846,7 +3846,7 @@ function OrderReceipt({
         <div className="receipt-thanks">ขอบคุณที่อุดหนุน</div>
         {Array.from({ length: bagLabelCount }, (_, index) => (
           <div key={`bag-label-${index}`}>
-            <div className="receipt-bag-cut-line"><span>ตัดตรงนี้</span></div>
+            <div className="receipt-bag-cut-line" />
             <section className="receipt-bag-label" aria-label={`ป้ายเลขออเดอร์ ${index + 1}`}>
               {orderNumber}
             </section>

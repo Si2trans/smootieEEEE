@@ -3261,21 +3261,8 @@ p {
 }
 
 .receipt-bag-cut-line {
-  position: relative;
   margin: 7mm 0 3mm;
   border-top: 1px dashed #000;
-}
-
-.receipt-bag-cut-line span {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  padding: 0 2mm;
-  background: #fff;
-  transform: translate(-50%, -55%);
-  font-size: 7px;
-  font-weight: 500;
-  white-space: nowrap;
 }
 
 .receipt-bag-label {
