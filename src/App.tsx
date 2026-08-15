@@ -3839,13 +3839,20 @@ function RecipeDetail({
         {recipe.items.length ? (
           recipe.items.map((item) => {
             const ingredient = byId.get(item.ingredientId);
+            const hasIngredientCost = Boolean(ingredient && Number(ingredient.costPerUnit) > 0);
+            const itemCost = hasIngredientCost ? Number(ingredient!.costPerUnit) * item.amount : 0;
             return (
               <div className="ingredient-line" key={`${item.ingredientId}-${item.amount}`}>
                 <span>{ingredient?.name ?? "วัตถุดิบ"}</span>
-                <strong>
-                  {item.note ? `${item.note} · ` : ""}
-                  {item.amount} {item.unit}
-                </strong>
+                <div className="ingredient-line__values">
+                  <strong>
+                    {item.note ? `${item.note} · ` : ""}
+                    {formatRecipeAmount(item.amount)} {item.unit}
+                  </strong>
+                  <small className={hasIngredientCost ? "" : "is-missing"}>
+                    {hasIngredientCost ? `${money(itemCost)} บาท` : "ไม่พบต้นทุน"}
+                  </small>
+                </div>
               </div>
             );
           })

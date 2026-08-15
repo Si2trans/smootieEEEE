@@ -2026,6 +2026,39 @@ p {
   border-bottom: 0;
 }
 
+.ingredient-line {
+  gap: 12px;
+}
+
+.ingredient-line > span {
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.ingredient-line__values {
+  display: grid;
+  flex: 0 1 58%;
+  gap: 2px;
+  min-width: 0;
+  text-align: right;
+}
+
+.ingredient-line__values strong {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ingredient-line__values small {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ingredient-line__values small.is-missing {
+  color: #8a9187;
+  font-weight: 600;
+}
+
 .steps {
   padding-left: 0;
   margin: 0;
