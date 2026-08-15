@@ -39,7 +39,9 @@ import type { ElementType, FormEvent, ReactNode, RefObject } from "react";
 import cardCostBg from "./assets/UI/card-cost-bg.png";
 import cardRecipesBg from "./assets/UI/card-recipes-bg.png";
 import { DrinkArt } from "./components/DrinkArt";
+import { OrderOcrImporter } from "./components/OrderOcrImporter";
 import { RecipeCard } from "./components/RecipeCard";
+import type { ParsedOcrOrder } from "./lib/orderOcr";
 import {
   authenticateAccessKey,
   archiveSalesMonth as archiveSalesMonthOnSheet,
@@ -658,6 +660,41 @@ function App() {
         item.id === itemId ? { ...item, addons: item.addons.filter((addon) => addon.id !== addonId) } : item
       )
     );
+  }
+
+  function importOcrOrder(imported: ParsedOcrOrder) {
+    const channel = ["หน้าร้าน", "LINE MAN", "Grab", "ShopeeFood", "อื่นๆ"].includes(imported.channel)
+      ? imported.channel
+      : "LINE MAN";
+    const nextItems: OrderItem[] = imported.items.map((item, index) => {
+      const qty = Math.max(1, Number(item.quantity || 1));
+      const unitPrice = Math.max(0, Number(item.lineTotal || 0)) / qty;
+      const recipe = findOcrRecipeMatch(item.name, unitPrice, channel, recipes);
+      return {
+        id: `order_ocr_${Date.now()}_${index}`,
+        recipeId: recipe?.id || "",
+        name: recipe?.name || item.name,
+        qty,
+        unitPrice: Number(unitPrice.toFixed(2)),
+        sweetness: item.sweetness,
+        note: item.note,
+        addons: []
+      };
+    });
+    const paymentMethod = (["เงินสด", "E-Payment", "ธนาคาร", "พร้อมเพย์"] as const)
+      .find((method) => method.toLowerCase() === imported.paymentMethod.trim().toLowerCase()) || "";
+
+    setOrderChannel(channel);
+    setOrderNumber(imported.orderNumber ? `#${imported.orderNumber.replace(/^#/, "")}` : makeOrderNumber());
+    setOrderCustomerName(imported.customerName);
+    setOrderTime(ocrTimeInput(imported.orderTime) || formatTimeInput(new Date()));
+    setOrderItems(nextItems);
+    setOrderNote("");
+    setOrderPromotionName(imported.promotionAmount > 0 ? imported.promotionName || "ส่วนลดร้านค้า" : "");
+    setOrderPromotionAmount(imported.promotionAmount);
+    setOrderPaymentMethod(channel === "Grab" ? hiddenOrderPaymentMethod : paymentMethod);
+    setOrderSearch("");
+    setMessage(imported.totalCheck.includes("ตรงกัน") ? "นำข้อมูลจากภาพเข้าออเดอร์แล้ว" : imported.totalCheck);
   }
 
   function addSaleRecipe(recipe: Recipe) {
@@ -1364,6 +1401,7 @@ function App() {
                     setOrderTime(formatTimeInput(new Date()));
                   }}
                   onCustomerName={setOrderCustomerName}
+                  onImportOcr={importOcrOrder}
                   onNote={setOrderNote}
                   onOrderNumber={setOrderNumber}
                   onOrderTime={setOrderTime}
@@ -2431,6 +2469,7 @@ function OrderScreen({
   onChannel,
   onClear,
   onCustomerName,
+  onImportOcr,
   onNote,
   onOrderNumber,
   onOrderTime,
@@ -2463,6 +2502,7 @@ function OrderScreen({
   onChannel: (channel: string) => void;
   onClear: () => void;
   onCustomerName: (name: string) => void;
+  onImportOcr: (order: ParsedOcrOrder) => void;
   onNote: (note: string) => void;
   onOrderNumber: (value: string) => void;
   onOrderTime: (value: string) => void;
@@ -2498,6 +2538,7 @@ function OrderScreen({
   return (
     <>
       <TopTitle title="ออเดอร์" />
+      <OrderOcrImporter hasExistingItems={items.length > 0} onApply={onImportOcr} />
       <section className="order-panel">
         <label>
           เลขออเดอร์
@@ -4584,6 +4625,53 @@ function clampPromotionAmount(amount: number, grossRevenue: number) {
 function orderUnitPrice(recipe: Recipe, channel: string) {
   if (channel === "หน้าร้าน") return Number(recipe.sellingPrice || 0);
   return Number(recipe.deliveryPrice || recipe.sellingPrice || 0);
+}
+
+function ocrTimeInput(value: string) {
+  const match = String(value || "").match(/(?:^|\s|,)([01]?\d|2[0-3]):([0-5]\d)(?:\s|$)/);
+  if (!match) return "";
+  return `${padNumber(Number(match[1]))}:${match[2]}`;
+}
+
+function normalizeOcrMenuName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\s()\[\]{}._\-/]+/g, "")
+    .replace(/ปัน/g, "ปั่น")
+    .replace(/สตอเบอ(?:ร์)?ธี่/g, "สตรอเบอร์รี่")
+    .replace(/มิกษ์/g, "มิกซ์")
+    .replace(/โยเกิต/g, "โยเกิร์ต");
+}
+
+function ocrEditDistance(left: string, right: string) {
+  if (!left.length) return right.length;
+  if (!right.length) return left.length;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+function findOcrRecipeMatch(name: string, unitPrice: number, channel: string, recipes: Recipe[]) {
+  const source = normalizeOcrMenuName(name);
+  if (!source) return undefined;
+  const matches = recipes.map((recipe) => {
+    const target = normalizeOcrMenuName(recipe.name);
+    const similarity = 1 - ocrEditDistance(source, target) / Math.max(source.length, target.length, 1);
+    const expectedPrice = orderUnitPrice(recipe, channel);
+    const priceMatches = unitPrice > 0 && Math.abs(expectedPrice - unitPrice) < 0.01;
+    return { recipe, score: similarity + (priceMatches ? 0.16 : 0) };
+  }).sort((left, right) => right.score - left.score);
+  return matches[0]?.score >= 0.64 ? matches[0].recipe : undefined;
 }
 
 function saleItemMultiplier(item: SaleDraftItem, allItems: SaleDraftItem[]) {

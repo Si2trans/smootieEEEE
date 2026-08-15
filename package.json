@@ -12,9 +12,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@paddleocr/paddleocr-js": "^0.4.2",
     "html-to-image": "^1.11.13",
     "jspdf": "^4.2.1",
     "lucide-react": "0.468.0",
+    "onnxruntime-web": "1.24.3",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "typescript": "5.7.3",
