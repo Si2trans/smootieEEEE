@@ -256,6 +256,7 @@ function doPost(e) {
 
     lock = LockService.getScriptLock();
     lock.waitLock(10000);
+    if (action === "savePlatformGpRates") return jsonResponse(savePlatformGpRates(payload));
     if (action === "saveCategory") return jsonResponse(saveCategory(payload));
     if (action === "saveCategoryOrder") return jsonResponse(saveCategoryOrder(payload));
     if (action === "deleteCategory") return jsonResponse(deleteCategory(payload));
@@ -683,6 +684,35 @@ function setRecipeFavorite(recipeId, favorite) {
   }
 }
 
+function getPlatformGpRates() {
+  const setting = readObjects(SHEETS.settings).find((row) => cleanId(row.key) === "platform_gp_rates");
+  let input = {};
+  try { input = setting ? JSON.parse(setting.value) : {}; } catch (error) { input = {}; }
+  if (!input || typeof input !== "object") input = {};
+  const rates = {};
+  ["LINE MAN", "Grab", "ShopeeFood"].forEach((channel) => {
+    const value = input[channel];
+    const rate = Number(value);
+    rates[channel] = value !== undefined && value !== null && value !== "" && isFinite(rate) && rate >= 0 && rate <= 100 ? rate : 32.1;
+  });
+  return rates;
+}
+
+function savePlatformGpRates(payload) {
+  const input = payload.rates || {};
+  const rates = {};
+  ["LINE MAN", "Grab", "ShopeeFood"].forEach((channel) => {
+    const value = input[channel];
+    const rate = Number(value);
+    if (value === undefined || value === null || value === "" || !isFinite(rate) || rate < 0 || rate > 100) {
+      throw new Error("GP ของ " + channel + " ต้องอยู่ระหว่าง 0 ถึง 100%");
+    }
+    rates[channel] = rate;
+  });
+  saveObject(SHEETS.settings, { id: "set_platform_gp_rates", key: "platform_gp_rates", value: JSON.stringify(rates) });
+  return { ok: true, rates: rates };
+}
+
 function saveSale(payload) {
   const sale = payload.sale || payload;
   const items = payload.items || [];
@@ -702,7 +732,12 @@ function saveSale(payload) {
   const subtotalAfterPromotion = roundCurrency(sale.gross_revenue - sale.promotion_amount);
   sale.gp_calculation_basis = sale.gp_calculation_basis === "before_promotion" ? "before_promotion" : "after_promotion";
   const gpBase = sale.gp_calculation_basis === "before_promotion" ? sale.gross_revenue : subtotalAfterPromotion;
-  sale.gp_rate = isDeliveryChannel(sale.channel) ? 32.1 : 0;
+  const hasGpRate = sale.gp_rate !== undefined && sale.gp_rate !== null && sale.gp_rate !== "";
+  const requestedGpRate = Number(sale.gp_rate);
+  if (isDeliveryChannel(sale.channel) && hasGpRate && (!isFinite(requestedGpRate) || requestedGpRate < 0 || requestedGpRate > 100)) {
+    throw new Error("ค่า GP ต้องอยู่ระหว่าง 0 ถึง 100%");
+  }
+  sale.gp_rate = isDeliveryChannel(sale.channel) ? (hasGpRate ? requestedGpRate : getPlatformGpRates()[sale.channel]) : 0;
   sale.gp_amount = roundCurrency((gpBase * sale.gp_rate) / 100);
   // Old clients and queued sales omit this field; preserve their original formula.
   sale.gp_vat_rate = Number(sale.gp_vat_rate || 0);

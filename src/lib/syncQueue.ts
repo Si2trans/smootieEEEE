@@ -11,6 +11,7 @@ import {
   saveIngredient,
   saveRecipe,
   saveSale,
+  savePlatformGpRates,
   uploadRecipeImage
 } from "./appsScriptApi";
 import type {
@@ -24,8 +25,8 @@ import type {
   SaveSaleInput,
   UploadImageInput
 } from "./appsScriptApi";
-import type { Category, Recipe } from "../types/app";
-import { calculateSaleRevenue, normalizeGpVatRate } from "./sales";
+import type { Category, Recipe, PlatformGpRates } from "../types/app";
+import { calculateSaleRevenue, normalizeGpVatRate, normalizePlatformGpRates } from "./sales";
 
 const DB_NAME = "drink-cost-studio-sync";
 const DB_VERSION = 1;
@@ -46,9 +47,9 @@ type SaveRecipeWithImagePayload = {
 
 export type SyncMutation = {
   id: string;
-  action: "saveCategory" | "saveCategoryOrder" | "deleteCategory" | "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "deleteSale" | "saveDailyClosing";
+  action: "saveCategory" | "saveCategoryOrder" | "deleteCategory" | "saveIngredient" | "saveRecipe" | "saveRecipeWithImage" | "deleteIngredient" | "deleteRecipe" | "saveSale" | "deleteSale" | "saveDailyClosing" | "savePlatformGpRates";
   entityId: string;
-  payload: SaveCategoryInput | SaveCategoryOrderInput | DeleteCategoryInput | SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | SaveSaleInput | SaveDailyClosingInput | { id: string };
+  payload: SaveCategoryInput | SaveCategoryOrderInput | DeleteCategoryInput | SaveIngredientInput | SaveRecipeInput | SaveRecipeWithImagePayload | SaveSaleInput | SaveDailyClosingInput | PlatformGpRates | { id: string };
   createdAt: number;
   attempts: number;
   status: "pending" | "syncing" | "failed";
@@ -107,8 +108,13 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
   let recipes = data.recipes.map((recipe) => ({ ...recipe, items: recipe.items.map((item) => ({ ...item })) }));
   let sales = (data.sales || []).map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
   let dailyClosings = (data.dailyClosings || []).map((closing) => ({ ...closing }));
+  let platformGpRates = normalizePlatformGpRates(data.platformGpRates);
 
   queued.forEach((mutation) => {
+    if (mutation.action === "savePlatformGpRates") {
+      platformGpRates = normalizePlatformGpRates(mutation.payload);
+      return;
+    }
     if (mutation.action === "saveCategory") {
       const category = mutation.payload as SaveCategoryInput;
       categories = categories.some((item) => item.id === category.id)
@@ -196,7 +202,7 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
     if (mutation.action === "saveSale") {
       const sale = mutation.payload as SaveSaleInput;
       const promotionAmount = Number(sale.promotionAmount || 0);
-      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel, sale.gpCalculationBasis, normalizeGpVatRate(sale.gpVatRate));
+      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel, sale.gpCalculationBasis, normalizeGpVatRate(sale.gpVatRate), sale.gpRate);
       const nextSale = {
         ...sale,
         grossRevenue: revenue.grossRevenue,
@@ -229,7 +235,7 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
     }
   });
 
-  return { ...data, categories, ingredients, recipes, sales, dailyClosings };
+  return { ...data, categories, ingredients, recipes, sales, dailyClosings, platformGpRates };
 }
 
 async function runFlush(): Promise<FlushResult> {
@@ -271,6 +277,10 @@ async function runFlush(): Promise<FlushResult> {
 }
 
 async function executeMutation(mutation: SyncMutation) {
+  if (mutation.action === "savePlatformGpRates") {
+    await savePlatformGpRates(mutation.payload as PlatformGpRates);
+    return;
+  }
   if (mutation.action === "saveCategory") {
     await saveCategory(mutation.payload as SaveCategoryInput);
     return;

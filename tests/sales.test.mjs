@@ -27,6 +27,110 @@ function loadBackend() {
 
 const sales = await loadClient("src/lib/sales.ts");
 
+function queuedDatabase(queued) {
+  return { open() {
+    const request = {};
+    queueMicrotask(() => {
+      request.result = { transaction: () => ({ objectStore: () => ({ getAll() {
+        const read = {};
+        queueMicrotask(() => { read.result = queued; read.onsuccess(); });
+        return read;
+      } }) }) };
+      request.onsuccess();
+    });
+    return request;
+  } };
+}
+
+test("platform GP rates validate settings, preserve zero, and match the LINE MAN statement", () => {
+  const rates = sales.normalizePlatformGpRates({ "LINE MAN": 30, Grab: 25.5, ShopeeFood: 0 });
+  assert.equal(sales.gpRateForChannel("LINE MAN", rates), 30);
+  assert.equal(sales.gpRateForChannel("Grab", rates), 25.5);
+  assert.equal(sales.gpRateForChannel("ShopeeFood", rates), 0);
+  assert.equal(sales.gpRateForChannel("หน้าร้าน", rates), 0);
+  for (const invalid of [undefined, null, "", -1, 101, NaN]) {
+    assert.equal(sales.normalizeGpRate(invalid), 32.1);
+  }
+  assert.equal(sales.normalizePlatformGpRates("bad json").Grab, 32.1);
+  const result = sales.calculateSaleRevenue(125, 6.4, "LINE MAN", "before_promotion", 7, rates["LINE MAN"]);
+  assert.equal(result.gpAmount, 37.5);
+  assert.equal(result.gpVatAmount, 2.63);
+  assert.equal(result.netRevenue, 78.47);
+  assert.equal(sales.calculateSaleRevenue(125, 6.4, "ShopeeFood", "before_promotion", 7, 0).netRevenue, 118.6);
+  assert.equal(sales.calculateSaleRevenue(125, 0, "หน้าร้าน", undefined, 7, 30).gpAmount, 0);
+});
+
+test("settings persist through API, backend, bootstrap and cache; sales keep their own rate", async () => {
+  const backend = loadBackend();
+  const storedSettings = [];
+  const storedSales = [];
+  backend.readObjects = (sheet) => sheet === "Settings" ? storedSettings : [];
+  backend.saveObject = (sheet, item) => {
+    const rows = sheet === "Settings" ? storedSettings : storedSales;
+    const index = rows.findIndex((row) => row.id === item.id);
+    if (index >= 0) rows[index] = { ...item }; else rows.push({ ...item });
+    return { item };
+  };
+  const storage = new Map([["drink-cost-studio:access-key:v1", "test-only"]]);
+  const api = await loadClient("src/lib/appsScriptApi.ts", {
+    window: { localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) } },
+    fetch: async (url, options) => {
+      const action = new URL(url).searchParams.get("action");
+      const payload = JSON.parse(options.body);
+      const result = action === "savePlatformGpRates" ? backend.savePlatformGpRates(payload)
+        : action === "saveSale" ? backend.saveSale(payload)
+          : { ok: true, settings: storedSettings, sales: storedSales };
+      return { ok: true, json: async () => result };
+    }
+  });
+  const rates = { "LINE MAN": 30, Grab: 25.5, ShopeeFood: 0 };
+  await api.savePlatformGpRates(rates);
+  const bootstrap = await api.fetchAppData();
+  assert.equal(bootstrap.platformGpRates["LINE MAN"], 30);
+  assert.equal(bootstrap.platformGpRates.Grab, 25.5);
+  assert.equal(bootstrap.platformGpRates.ShopeeFood, 0);
+  // Unrelated recipe/sale cache writes must not erase the saved GP settings.
+  const { platformGpRates, ...withoutSettings } = bootstrap;
+  api.cacheAppData(withoutSettings);
+  assert.equal(api.getCachedAppData().platformGpRates["LINE MAN"], 30);
+  const sale = { id: "statement", saleDate: "2026-10-25", channel: "LINE MAN", grossRevenue: 125,
+    promotionAmount: 6.4, gpCalculationBasis: "before_promotion", gpVatRate: 7, gpRate: 30, totalCost: 20, items: [] };
+  await api.saveSale(sale);
+  assert.equal(storedSales[0].gp_rate, 30);
+  assert.equal(storedSales[0].total_revenue, 78.47);
+  await api.savePlatformGpRates({ ...rates, "LINE MAN": 35 });
+  await api.saveSale(sale);
+  assert.equal(storedSales[0].gp_rate, 30);
+  assert.equal(storedSales[0].total_revenue, 78.47);
+  await api.saveSale({ ...sale, channel: "ShopeeFood", gpRate: 0 });
+  assert.equal(storedSales[0].gp_rate, 0);
+  assert.equal(storedSales[0].gp_vat_amount, 0);
+  assert.equal(storedSales[0].total_revenue, 118.6);
+  const fallback = backend.saveSale({ sale: { id: "fallback", channel: "LINE MAN", gross_revenue: 100, gp_vat_rate: 7 }, items: [] });
+  assert.equal(fallback.sale.gp_rate, 35);
+  assert.throws(() => backend.saveSale({ sale: { ...sale, gp_rate: -1 }, items: [] }), /GP/);
+  assert.throws(() => backend.savePlatformGpRates({ rates: { ...rates, Grab: 101 } }), /GP/);
+});
+
+test("offline setting changes do not replace GP snapshots on pending or historical sales", async () => {
+  const rates = { "LINE MAN": 35, Grab: 25, ShopeeFood: 0 };
+  const snapshot = { id: "pending", channel: "LINE MAN", grossRevenue: 125, promotionAmount: 6.4,
+    gpCalculationBasis: "before_promotion", gpVatRate: 7, gpRate: 30, totalCost: 20, items: [] };
+  const queued = [
+    { action: "saveSale", createdAt: 0, payload: snapshot },
+    { action: "savePlatformGpRates", createdAt: 1, payload: rates }
+  ];
+  const queue = await loadClient("src/lib/syncQueue.ts", { indexedDB: queuedDatabase(queued) });
+  const data = await queue.applyQueuedMutations({ categories: [], ingredients: [], recipes: [],
+    sales: [{ ...snapshot, id: "old", gpRate: 32.1, totalRevenue: 76 }], dailyClosings: [] });
+  assert.equal(data.platformGpRates["LINE MAN"], 35);
+  assert.equal(data.platformGpRates.ShopeeFood, 0);
+  assert.equal(data.sales.find((sale) => sale.id === "pending").gpRate, 30);
+  assert.equal(data.sales.find((sale) => sale.id === "pending").totalRevenue, 78.47);
+  assert.equal(data.sales.find((sale) => sale.id === "old").gpRate, 32.1);
+  assert.equal(data.sales.find((sale) => sale.id === "old").totalRevenue, 76);
+});
+
 test("GP and its VAT use the selected promotion basis", () => {
   const before = sales.calculateSaleRevenue(100, 10, "Grab", "before_promotion");
   const after = sales.calculateSaleRevenue(100, 10, "Grab", "after_promotion");
@@ -158,18 +262,7 @@ test("offline queue replay keeps the basis and recalculates revenue and profit c
       totalRevenue: 0, totalCost: 20, items: [] }
   }));
   const queue = await loadClient("src/lib/syncQueue.ts", {
-    indexedDB: { open() {
-      const request = {};
-      queueMicrotask(() => {
-        request.result = { transaction: () => ({ objectStore: () => ({ getAll() {
-          const read = {};
-          queueMicrotask(() => { read.result = queued; read.onsuccess(); });
-          return read;
-        } }) }) };
-        request.onsuccess();
-      });
-      return request;
-    } }
+    indexedDB: queuedDatabase(queued)
   });
   const data = await queue.applyQueuedMutations({ categories: [], ingredients: [], recipes: [], sales: [], dailyClosings: [] });
   for (const sale of data.sales) {

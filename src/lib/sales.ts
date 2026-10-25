@@ -1,12 +1,32 @@
-import type { GpCalculationBasis } from "../types/app";
+import type { GpCalculationBasis, PlatformGpRates } from "../types/app";
 
 export const DELIVERY_GP_RATE = 32.1;
 export const GP_VAT_RATE = 7;
 
-const deliveryChannels = new Set(["LINE MAN", "Grab", "ShopeeFood"]);
+export const DELIVERY_CHANNELS = ["LINE MAN", "Grab", "ShopeeFood"] as const;
+const deliveryChannels = new Set<string>(DELIVERY_CHANNELS);
 
-export function gpRateForChannel(channel: string) {
-  return deliveryChannels.has(channel) ? DELIVERY_GP_RATE : 0;
+export function normalizeGpRate(value: unknown, fallback = DELIVERY_GP_RATE) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : fallback;
+}
+
+export function normalizePlatformGpRates(value: unknown): PlatformGpRates {
+  let input = value;
+  if (typeof input === "string") {
+    try { input = JSON.parse(input); } catch { input = null; }
+  }
+  const rates = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  return {
+    "LINE MAN": normalizeGpRate(rates["LINE MAN"]),
+    Grab: normalizeGpRate(rates.Grab),
+    ShopeeFood: normalizeGpRate(rates.ShopeeFood)
+  };
+}
+
+export function gpRateForChannel(channel: string, rates?: PlatformGpRates) {
+  return deliveryChannels.has(channel) ? normalizeGpRate(rates?.[channel as keyof PlatformGpRates]) : 0;
 }
 
 export function normalizeGpCalculationBasis(value: unknown): GpCalculationBasis {
@@ -28,11 +48,11 @@ export function calculateGpCharges(base: number, rate: number, vatRate = GP_VAT_
   return { gpRate, gpAmount, gpVatRate, gpVatAmount, totalPlatformFee };
 }
 
-export function calculateSaleRevenue(grossRevenue: number, promotionAmount: number, channel: string, calculationBasis?: GpCalculationBasis, vatRate = GP_VAT_RATE) {
+export function calculateSaleRevenue(grossRevenue: number, promotionAmount: number, channel: string, calculationBasis?: GpCalculationBasis, vatRate = GP_VAT_RATE, rateOverride?: number) {
   const gross = safeNonNegative(grossRevenue);
   const promotion = Math.min(safeNonNegative(promotionAmount), gross);
   const subtotalAfterPromotion = roundCurrency(gross - promotion);
-  const gpRate = gpRateForChannel(channel);
+  const gpRate = deliveryChannels.has(channel) ? normalizeGpRate(rateOverride) : 0;
   const gpCalculationBasis = normalizeGpCalculationBasis(calculationBasis);
   const gpBase = gpCalculationBasis === "before_promotion" ? gross : subtotalAfterPromotion;
   const charges = calculateGpCharges(gpBase, gpRate, vatRate);

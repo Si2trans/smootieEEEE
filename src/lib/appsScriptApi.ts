@@ -1,5 +1,6 @@
 import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
-import { calculateSaleRevenue, normalizeGpCalculationBasis, normalizeGpVatRate } from "./sales";
+import { calculateSaleRevenue, normalizeGpCalculationBasis, normalizeGpVatRate, normalizePlatformGpRates } from "./sales";
+import type { PlatformGpRates } from "../types/app";
 
 const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
@@ -12,6 +13,7 @@ const MAX_SAFE_IMAGE_URL_LENGTH = 2000;
 
 type BootstrapResponse = {
   ok?: boolean;
+  settings?: Array<Record<string, unknown>>;
   categories?: Array<Record<string, unknown>>;
   ingredients?: Array<Record<string, unknown>>;
   recipes?: Array<Record<string, unknown>>;
@@ -25,6 +27,7 @@ type BootstrapResponse = {
 };
 
 export type AppData = {
+  platformGpRates?: PlatformGpRates;
   categories: Category[];
   ingredients: Ingredient[];
   recipes: Recipe[];
@@ -123,6 +126,7 @@ export function cacheAppData(data: AppData) {
   try {
     const cacheable = {
       ...data,
+      platformGpRates: normalizePlatformGpRates(data.platformGpRates ?? getCachedAppData()?.platformGpRates),
       recipes: data.recipes.map((recipe) => ({
         ...recipe,
         imageUrl: safeRecipeImageUrl(recipe.imageUrl)
@@ -189,10 +193,14 @@ export async function saveIngredient(input: SaveIngredientInput) {
   });
 }
 
+export async function savePlatformGpRates(rates: PlatformGpRates) {
+  return postAction("savePlatformGpRates", { rates });
+}
+
 export async function saveSale(input: SaveSaleInput) {
   const promotionAmount = Number(input.promotionAmount || 0);
   const grossRevenue = Number(input.grossRevenue ?? Number(input.totalRevenue || 0) + promotionAmount);
-  const revenue = calculateSaleRevenue(grossRevenue, promotionAmount, input.channel, input.gpCalculationBasis, normalizeGpVatRate(input.gpVatRate));
+  const revenue = calculateSaleRevenue(grossRevenue, promotionAmount, input.channel, input.gpCalculationBasis, normalizeGpVatRate(input.gpVatRate), input.gpRate);
   const totalCost = Number(input.totalCost || 0);
   return postAction("saveSale", {
     sale: {
@@ -382,6 +390,7 @@ function normalizeBootstrapData(data: BootstrapResponse): AppData {
 
   return {
     categories: [ALL_CATEGORY, ...categories],
+    platformGpRates: normalizePlatformGpRates((data.settings || []).find((row) => row.key === "platform_gp_rates")?.value),
     ingredients,
     recipes,
     sales: normalizeSales(data.sales || [], data.saleItems || [], recipes, categories),
@@ -712,6 +721,7 @@ function normalizeAppDataDates(data: AppData): AppData {
   return {
     ...data,
     categories,
+    platformGpRates: normalizePlatformGpRates(data.platformGpRates),
     sales: (data.sales || []).map((sale) => ({ ...sale, saleDate: businessDateKey(sale.saleDate) })),
     dailyClosings: (data.dailyClosings || []).map((closing) => ({ ...closing, businessDate: businessDateKey(closing.businessDate) }))
   };

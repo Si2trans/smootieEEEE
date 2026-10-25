@@ -2878,6 +2878,51 @@ p {
   font-weight: 800;
 }
 
+.gp-settings {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #dfe9d9;
+  border-radius: 13px;
+  background: #f8fbf6;
+}
+
+.gp-settings summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--green-dark);
+}
+
+.gp-settings summary svg {
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.gp-settings p,
+.gp-rate-note {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.gp-settings label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 100px;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.gp-settings input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #dfe6da;
+  border-radius: 9px;
+  padding: 7px 9px;
+  background: #fff;
+}
+
 .promotion-panel,
 .sale-edit-banner {
   margin-top: 12px;

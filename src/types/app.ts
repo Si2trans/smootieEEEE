@@ -82,6 +82,8 @@ export type SaleItem = {
 };
 
 export type GpCalculationBasis = "before_promotion" | "after_promotion";
+export type DeliveryChannel = "LINE MAN" | "Grab" | "ShopeeFood";
+export type PlatformGpRates = Record<DeliveryChannel, number>;
 
 export type Sale = {
   id: string;

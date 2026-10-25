@@ -66,8 +66,8 @@ import {
 import type { SyncState } from "./lib/syncQueue";
 import { getLocalQueueOrders, storeLocalQueueOrders } from "./lib/localQueue";
 import { calculateCost, calculateGpOffsetPrice, money, roundPrice } from "./lib/cost";
-import { calculateGpCharges, calculateSaleRevenue, DELIVERY_GP_RATE, GP_VAT_RATE, gpRateForChannel, normalizeGpCalculationBasis, normalizeGpVatRate, roundCurrency } from "./lib/sales";
-import type { GpCalculationBasis } from "./types/app";
+import { calculateGpCharges, calculateSaleRevenue, DELIVERY_CHANNELS, GP_VAT_RATE, gpRateForChannel, normalizeGpCalculationBasis, normalizeGpVatRate, normalizePlatformGpRates, roundCurrency } from "./lib/sales";
+import type { DeliveryChannel, GpCalculationBasis, PlatformGpRates } from "./types/app";
 import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, QueueAddon, QueueItem, QueueOrder, QueueStatus, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
@@ -179,10 +179,10 @@ const receiptPaperPresets: Array<{ id: ReceiptPaperPresetId; label: string; pape
   { id: "custom", label: "กำหนดเอง", paperWidthMm: 77 }
 ];
 const deliveryPlatforms = [
-  { id: "lineman", name: "LINE MAN", fee: 30, icon: "/LINEMAN.png" },
-  { id: "grab", name: "Grab", fee: 32, icon: "/GRAB.png" },
-  { id: "shopeefood", name: "ShopeeFood", fee: 30, icon: "/SHOPEE_FOOD.png" }
-];
+  { id: "lineman", name: "LINE MAN", icon: "/LINEMAN.png" },
+  { id: "grab", name: "Grab", icon: "/GRAB.png" },
+  { id: "shopeefood", name: "ShopeeFood", icon: "/SHOPEE_FOOD.png" }
+] as const;
 
 function App() {
   const [cachedData] = useState(() => getCachedAppData());
@@ -195,7 +195,9 @@ function App() {
   const [ingredientFilter, setIngredientFilter] = useState<IngredientFilter>("all");
   const [costMode, setCostMode] = useState<CostMode>("formula");
   const [targetMargin, setTargetMargin] = useState(60);
-  const [deliveryFee, setDeliveryFee] = useState(DELIVERY_GP_RATE);
+  const [platformGpRates, setPlatformGpRates] = useState(() => normalizePlatformGpRates(cachedData?.platformGpRates));
+  const [deliveryPlatform, setDeliveryPlatform] = useState<DeliveryChannel>("LINE MAN");
+  const [deliveryFeeOverride, setDeliveryFeeOverride] = useState<number | null>(null);
   const [deliveryPricingMode, setDeliveryPricingMode] = useState<DeliveryPricingMode>("offsetGp");
   const [deliveryMarkup, setDeliveryMarkup] = useState(50);
   const [orderChannel, setOrderChannel] = useState("หน้าร้าน");
@@ -225,6 +227,7 @@ function App() {
   const [salePromotionAmount, setSalePromotionAmount] = useState(0);
   const [saleGpCalculationBasis, setSaleGpCalculationBasis] = useState<GpCalculationBasis>("after_promotion");
   const [saleGpVatRate, setSaleGpVatRate] = useState(GP_VAT_RATE);
+  const [editingSaleGpRate, setEditingSaleGpRate] = useState<number | null>(null);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingSaleCreatedAt, setEditingSaleCreatedAt] = useState("");
   const [editingSaleOriginalDate, setEditingSaleOriginalDate] = useState("");
@@ -328,7 +331,9 @@ function App() {
   const orderTotal = Math.max(0, orderGrossTotal - orderDiscount);
   const saleDraftTotals = calculateSaleDraftTotals(saleItems);
   const saleDiscount = clampPromotionAmount(salePromotionAmount, saleDraftTotals.revenue);
-  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel, saleGpCalculationBasis, saleGpVatRate);
+  const deliveryFee = deliveryFeeOverride ?? gpRateForChannel(deliveryPlatform, platformGpRates);
+  const saleGpRate = editingSaleGpRate ?? gpRateForChannel(saleChannel, platformGpRates);
+  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel, saleGpCalculationBasis, saleGpVatRate, saleGpRate);
   const saleTotals = {
     ...saleDraftTotals,
     ...saleRevenue,
@@ -336,7 +341,8 @@ function App() {
     profit: saleRevenue.netRevenue - saleDraftTotals.cost
   };
 
-  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[]; monthlyArchives?: MonthlyArchive[]; archiveMonths?: string[] }, selectedId?: string) {
+  function applyData(data: { categories: Category[]; ingredients: Ingredient[]; recipes: Recipe[]; sales?: Sale[]; dailyClosings?: DailyClosing[]; monthlyArchives?: MonthlyArchive[]; archiveMonths?: string[]; platformGpRates?: PlatformGpRates }, selectedId?: string) {
+    setPlatformGpRates(normalizePlatformGpRates(data.platformGpRates));
     setCategoryList(data.categories);
     setSelectedCategory((current) => data.categories.some((category) => category.id === current) ? current : "all");
     setIngredientList(data.ingredients);
@@ -346,6 +352,15 @@ function App() {
     setMonthlyArchives(data.monthlyArchives || []);
     setArchiveMonths(data.archiveMonths || []);
     setSelectedRecipe((current) => data.recipes.find((recipe) => recipe.id === (selectedId || current?.id)) || data.recipes[0] || null);
+  }
+
+  async function updatePlatformGpRates(rates: PlatformGpRates) {
+    await enqueueMutation({ action: "savePlatformGpRates", entityId: "platform_gp_rates", payload: rates });
+    setPlatformGpRates(rates);
+    setDeliveryFeeOverride(null);
+    cacheAppData({ categories: categoryList, ingredients: ingredientList, recipes, sales, dailyClosings, monthlyArchives, archiveMonths, platformGpRates: rates });
+    setMessage("บันทึกค่า GP แต่ละแพลตฟอร์มแล้ว");
+    void syncPendingInBackground();
   }
 
   function syncPendingInBackground(preferredSelectedId?: string) {
@@ -797,6 +812,7 @@ function App() {
     setSalePromotionAmount(0);
     setSaleGpCalculationBasis("after_promotion");
     setSaleGpVatRate(GP_VAT_RATE);
+    setEditingSaleGpRate(null);
     setEditingSaleId(null);
     setEditingSaleCreatedAt("");
     setEditingSaleOriginalDate("");
@@ -826,6 +842,7 @@ function App() {
     setSalePromotionAmount(sale.promotionAmount || 0);
     setSaleGpCalculationBasis(normalizeGpCalculationBasis(sale.gpCalculationBasis));
     setSaleGpVatRate(normalizeGpVatRate(sale.gpVatRate));
+    setEditingSaleGpRate(sale.gpRate);
     setEditingSaleId(sale.id);
     setEditingSaleCreatedAt(sale.createdAt);
     setEditingSaleOriginalDate(sale.saleDate);
@@ -1447,6 +1464,8 @@ function App() {
                   promotionAmount={salePromotionAmount}
                   promotionName={salePromotionName}
                   gpCalculationBasis={saleGpCalculationBasis}
+                  platformGpRates={platformGpRates}
+                  onSavePlatformGpRates={updatePlatformGpRates}
                   recipes={recipes}
                   sales={sales}
                   saving={saving}
@@ -1456,7 +1475,10 @@ function App() {
                   onAddRecipe={addSaleRecipe}
                   onAddTopping={addSaleTopping}
                   onArchiveMonth={archiveSalesMonth}
-                  onChannel={setSaleChannel}
+                  onChannel={(channel) => {
+                    if (channel !== saleChannel) setEditingSaleGpRate(null);
+                    setSaleChannel(channel);
+                  }}
                   onCancelEdit={resetSaleEditor}
                   onClear={resetSaleEditor}
                   onCloseDay={closeSalesDay}
@@ -1478,6 +1500,13 @@ function App() {
                   cost={selectedCost}
                   costMode={costMode}
                   deliveryFee={deliveryFee}
+                  deliveryPlatform={deliveryPlatform}
+                  platformGpRates={platformGpRates}
+                  onSavePlatformGpRates={updatePlatformGpRates}
+                  onDeliveryPlatform={(channel) => {
+                    setDeliveryPlatform(channel);
+                    setDeliveryFeeOverride(null);
+                  }}
                   deliveryMarkup={deliveryMarkup}
                   deliveryPricingMode={deliveryPricingMode}
                   ingredients={ingredientList}
@@ -1489,7 +1518,7 @@ function App() {
                     setPickingCostRecipe(true);
                     setTab("recipes");
                   }}
-                  onDeliveryFee={setDeliveryFee}
+                  onDeliveryFee={setDeliveryFeeOverride}
                   onDeliveryPricingMode={setDeliveryPricingMode}
                   onMargin={setTargetMargin}
                 />
@@ -2889,6 +2918,59 @@ function PromotionEditor({
   );
 }
 
+function PlatformGpSettings({ rates, onSave }: { rates: PlatformGpRates; onSave: (rates: PlatformGpRates) => Promise<void> }) {
+  const lineManRate = rates["LINE MAN"];
+  const grabRate = rates.Grab;
+  const shopeeFoodRate = rates.ShopeeFood;
+  const [draft, setDraft] = useState(() => Object.fromEntries(DELIVERY_CHANNELS.map((channel) => [channel, String(rates[channel])])));
+  const [savingRates, setSavingRates] = useState(false);
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    setDraft({ "LINE MAN": String(lineManRate), Grab: String(grabRate), ShopeeFood: String(shopeeFoodRate) });
+  }, [lineManRate, grabRate, shopeeFoodRate]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const values = DELIVERY_CHANNELS.map((channel) => Number(draft[channel]));
+    if (DELIVERY_CHANNELS.some((channel, index) => draft[channel].trim() === "" || !Number.isFinite(values[index]) || values[index] < 0 || values[index] > 100)) {
+      setStatus("กรอก GP ของทุกแพลตฟอร์มเป็นตัวเลขระหว่าง 0 ถึง 100%");
+      return;
+    }
+    setSavingRates(true);
+    setStatus("");
+    try {
+      await onSave(normalizePlatformGpRates(draft));
+      setStatus("บันทึกแล้ว ใช้กับรายการขายใหม่และการคำนวณราคา");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "บันทึกค่า GP ไม่สำเร็จ");
+    } finally {
+      setSavingRates(false);
+    }
+  }
+
+  return (
+    <details className="gp-settings">
+      <summary><Settings2 size={16} /> ตั้งค่า GP แต่ละแพลตฟอร์ม</summary>
+      <form onSubmit={submit}>
+        <p>ใส่ GP ก่อน VAT ระบบคิด VAT 7% ของค่า GP เพิ่มให้ ใช้กับรายการขายใหม่ ส่วนรายการเดิมคงอัตราที่บันทึกไว้</p>
+        {DELIVERY_CHANNELS.map((channel) => (
+          <label key={channel}>
+            <span>{channel} GP (%)</span>
+            <input disabled={savingRates} inputMode="decimal" max="100" min="0" onChange={(event) => {
+              const value = event.currentTarget.value;
+              setDraft((current) => ({ ...current, [channel]: value }));
+              setStatus("");
+            }} required step="0.01" type="number" value={draft[channel]} />
+          </label>
+        ))}
+        <button className="submit-button" disabled={savingRates} type="submit">{savingRates ? "กำลังบันทึก..." : "บันทึกค่า GP"}</button>
+        {status ? <p role="status">{status}</p> : null}
+      </form>
+    </details>
+  );
+}
+
 function SalesScreen({
   archiveMonths,
   categories,
@@ -2904,6 +2986,8 @@ function SalesScreen({
   promotionAmount,
   promotionName,
   gpCalculationBasis,
+  platformGpRates,
+  onSavePlatformGpRates,
   recipes,
   sales,
   saving,
@@ -2944,6 +3028,8 @@ function SalesScreen({
   promotionAmount: number;
   promotionName: string;
   gpCalculationBasis: GpCalculationBasis;
+  platformGpRates: PlatformGpRates;
+  onSavePlatformGpRates: (rates: PlatformGpRates) => Promise<void>;
   recipes: Recipe[];
   sales: Sale[];
   saving: boolean;
@@ -2989,6 +3075,7 @@ function SalesScreen({
   return (
     <>
       <TopTitle title="บันทึกขาย" />
+      <PlatformGpSettings onSave={onSavePlatformGpRates} rates={platformGpRates} />
       {editingSaleId ? (
         <section className="sale-edit-banner">
           <div><strong>กำลังแก้ไขรายการเดิม</strong><small>บันทึกแล้วจะอัปเดตรายการนี้ ไม่สร้างรายการซ้ำ</small></div>
@@ -3007,6 +3094,7 @@ function SalesScreen({
             </button>
           ))}
         </div>
+        {DELIVERY_CHANNELS.some((item) => item === channel) ? <p className="gp-rate-note">รายการนี้ใช้ GP {totals.gpRate.toFixed(2)}% ก่อน VAT</p> : null}
       </section>
 
       <label className="search-box search-box--screen">
@@ -4018,6 +4106,10 @@ function CostScreen({
   cost,
   costMode,
   deliveryFee,
+  deliveryPlatform,
+  platformGpRates,
+  onSavePlatformGpRates,
+  onDeliveryPlatform,
   deliveryMarkup,
   deliveryPricingMode,
   targetMargin,
@@ -4033,6 +4125,10 @@ function CostScreen({
   cost: ReturnType<typeof calculateCost>;
   costMode: CostMode;
   deliveryFee: number;
+  deliveryPlatform: DeliveryChannel;
+  platformGpRates: PlatformGpRates;
+  onSavePlatformGpRates: (rates: PlatformGpRates) => Promise<void>;
+  onDeliveryPlatform: (channel: DeliveryChannel) => void;
   deliveryMarkup: number;
   deliveryPricingMode: DeliveryPricingMode;
   targetMargin: number;
@@ -4099,6 +4195,7 @@ function CostScreen({
           </section>
           <section className="delivery-card">
             <h3>หักเปอร์เซ็นต์เดลิเวอรี่</h3>
+            <PlatformGpSettings onSave={onSavePlatformGpRates} rates={platformGpRates} />
             <div className="delivery-mode-row">
               <button
                 className={deliveryPricingMode === "offsetGp" ? "is-active" : ""}
@@ -4118,14 +4215,14 @@ function CostScreen({
             <div className="platform-row">
               {deliveryPlatforms.map((platform) => (
                 <button
-                  className={deliveryFee === platform.fee ? "is-active" : ""}
+                  className={deliveryPlatform === platform.name ? "is-active" : ""}
                   key={platform.id}
-                  onClick={() => onDeliveryFee(platform.fee)}
+                  onClick={() => onDeliveryPlatform(platform.name)}
                   type="button"
                 >
                   <img alt="" src={platform.icon} />
                   <span>{platform.name}</span>
-                  <strong>GP {platform.fee.toFixed(2)}%</strong>
+                  <strong>GP {platformGpRates[platform.name].toFixed(2)}%</strong>
                 </button>
               ))}
             </div>
@@ -4139,7 +4236,7 @@ function CostScreen({
                 type="number"
                 value={deliveryFee}
               />
-              <small>คิด VAT {GP_VAT_RATE}% เพิ่มจากค่า GP</small>
+              <small>คิด VAT {GP_VAT_RATE}% เพิ่มจากค่า GP ช่องนี้ใช้ลองคำนวณ ตั้งค่าประจำได้ที่ “ตั้งค่า GP แต่ละแพลตฟอร์ม”</small>
             </label>
             {deliveryPricingMode === "markup" ? (
               <label className="fee-input">
