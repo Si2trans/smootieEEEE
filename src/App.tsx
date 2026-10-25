@@ -65,8 +65,8 @@ import {
 } from "./lib/syncQueue";
 import type { SyncState } from "./lib/syncQueue";
 import { getLocalQueueOrders, storeLocalQueueOrders } from "./lib/localQueue";
-import { calculateCost, money, roundPrice } from "./lib/cost";
-import { calculateSaleRevenue, gpRateForChannel, normalizeGpCalculationBasis } from "./lib/sales";
+import { calculateCost, calculateGpOffsetPrice, money, roundPrice } from "./lib/cost";
+import { calculateGpCharges, calculateSaleRevenue, DELIVERY_GP_RATE, GP_VAT_RATE, gpRateForChannel, normalizeGpCalculationBasis, normalizeGpVatRate, roundCurrency } from "./lib/sales";
 import type { GpCalculationBasis } from "./types/app";
 import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, QueueAddon, QueueItem, QueueOrder, QueueStatus, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
@@ -195,7 +195,7 @@ function App() {
   const [ingredientFilter, setIngredientFilter] = useState<IngredientFilter>("all");
   const [costMode, setCostMode] = useState<CostMode>("formula");
   const [targetMargin, setTargetMargin] = useState(60);
-  const [deliveryFee, setDeliveryFee] = useState(30);
+  const [deliveryFee, setDeliveryFee] = useState(DELIVERY_GP_RATE);
   const [deliveryPricingMode, setDeliveryPricingMode] = useState<DeliveryPricingMode>("offsetGp");
   const [deliveryMarkup, setDeliveryMarkup] = useState(50);
   const [orderChannel, setOrderChannel] = useState("หน้าร้าน");
@@ -224,6 +224,7 @@ function App() {
   const [salePromotionName, setSalePromotionName] = useState("");
   const [salePromotionAmount, setSalePromotionAmount] = useState(0);
   const [saleGpCalculationBasis, setSaleGpCalculationBasis] = useState<GpCalculationBasis>("after_promotion");
+  const [saleGpVatRate, setSaleGpVatRate] = useState(GP_VAT_RATE);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingSaleCreatedAt, setEditingSaleCreatedAt] = useState("");
   const [editingSaleOriginalDate, setEditingSaleOriginalDate] = useState("");
@@ -327,7 +328,7 @@ function App() {
   const orderTotal = Math.max(0, orderGrossTotal - orderDiscount);
   const saleDraftTotals = calculateSaleDraftTotals(saleItems);
   const saleDiscount = clampPromotionAmount(salePromotionAmount, saleDraftTotals.revenue);
-  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel, saleGpCalculationBasis);
+  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel, saleGpCalculationBasis, saleGpVatRate);
   const saleTotals = {
     ...saleDraftTotals,
     ...saleRevenue,
@@ -795,6 +796,7 @@ function App() {
     setSalePromotionName("");
     setSalePromotionAmount(0);
     setSaleGpCalculationBasis("after_promotion");
+    setSaleGpVatRate(GP_VAT_RATE);
     setEditingSaleId(null);
     setEditingSaleCreatedAt("");
     setEditingSaleOriginalDate("");
@@ -823,6 +825,7 @@ function App() {
     setSalePromotionName(sale.promotionName || "");
     setSalePromotionAmount(sale.promotionAmount || 0);
     setSaleGpCalculationBasis(normalizeGpCalculationBasis(sale.gpCalculationBasis));
+    setSaleGpVatRate(normalizeGpVatRate(sale.gpVatRate));
     setEditingSaleId(sale.id);
     setEditingSaleCreatedAt(sale.createdAt);
     setEditingSaleOriginalDate(sale.saleDate);
@@ -905,6 +908,8 @@ function App() {
         gpCalculationBasis: saleTotals.gpCalculationBasis,
         gpRate: saleTotals.gpRate,
         gpAmount: saleTotals.gpAmount,
+        gpVatRate: saleTotals.gpVatRate,
+        gpVatAmount: saleTotals.gpVatAmount,
         totalRevenue: saleTotals.revenue,
         totalCost: saleTotals.cost,
         totalProfit: saleTotals.profit,
@@ -3144,6 +3149,21 @@ function SalesScreen({
             <strong>-{money(totals.gpAmount)} บาท</strong>
           </div>
         ) : null}
+        {totals.gpRate > 0 && totals.gpVatRate > 0 ? (
+          <div className="is-discount">
+            <span>VAT {totals.gpVatRate}% ของค่า GP</span>
+            <strong>-{money(totals.gpVatAmount)} บาท</strong>
+          </div>
+        ) : null}
+        {totals.gpRate > 0 ? (
+          <div>
+            <span>รวมค่าธรรมเนียม GP + VAT</span>
+            <strong>{money(totals.totalPlatformFee)} บาท</strong>
+          </div>
+        ) : null}
+        {editingSaleId && totals.gpRate > 0 && totals.gpVatRate === 0 ? (
+          <p className="sale-history-note">รายการเดิม: คงสูตรที่บันทึกไว้ก่อนแยก VAT ของ GP</p>
+        ) : null}
         <div>
           <span>รายรับสุทธิ</span>
           <strong>{money(totals.revenue)} บาท</strong>
@@ -3300,6 +3320,19 @@ function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) =
             <strong>-{money(sale.gpAmount)} บาท</strong>
           </div>
         ) : null}
+        {sale.gpRate > 0 && (sale.gpVatRate || 0) > 0 ? (
+          <div className="sale-history-promotion">
+            <span>VAT {sale.gpVatRate}% ของค่า GP</span>
+            <strong>-{money(sale.gpVatAmount || 0)} บาท</strong>
+          </div>
+        ) : null}
+        {sale.gpRate > 0 ? (
+          <div className="sale-history-line">
+            <span>รวมค่าธรรมเนียม GP + VAT</span>
+            <strong>{money(roundCurrency(sale.gpAmount + (sale.gpVatAmount || 0)))} บาท</strong>
+          </div>
+        ) : null}
+        {sale.gpRate > 0 && !sale.gpVatRate ? <p className="sale-history-note">รายการเดิม: คงสูตรที่บันทึกไว้ก่อนแยก VAT ของ GP</p> : null}
         {sale.note ? <p className="sale-history-note">หมายเหตุ: {sale.note}</p> : null}
         <div className="sale-history-totals">
           <span>ต้นทุน {money(sale.totalCost)}</span>
@@ -4014,12 +4047,10 @@ function CostScreen({
   const deliveryPrice =
     deliveryPricingMode === "markup"
       ? roundPrice(recipe.sellingPrice * (1 + Math.max(deliveryMarkup, 0) / 100))
-      : deliveryFee >= 100
-        ? 0
-        : roundPrice(recipe.sellingPrice / (1 - deliveryFee / 100));
-  const platformFeeAmount = (deliveryPrice * deliveryFee) / 100;
-  const deliveryNetRevenue = deliveryPrice - platformFeeAmount;
-  const deliveryProfit = deliveryNetRevenue - cost.totalCost;
+      : calculateGpOffsetPrice(recipe.sellingPrice, deliveryFee);
+  const platformCharges = calculateGpCharges(deliveryPrice, deliveryFee);
+  const deliveryNetRevenue = roundCurrency(deliveryPrice - platformCharges.totalPlatformFee);
+  const deliveryProfit = roundCurrency(deliveryNetRevenue - cost.totalCost);
   const deliveryMargin = deliveryPrice > 0 ? (deliveryProfit / deliveryPrice) * 100 : 0;
   const deliveryMarkupAmount = deliveryPrice - recipe.sellingPrice;
   return (
@@ -4074,7 +4105,7 @@ function CostScreen({
                 onClick={() => onDeliveryPricingMode("offsetGp")}
                 type="button"
               >
-                ชดเชย GP
+                ชดเชย GP + VAT
               </button>
               <button
                 className={deliveryPricingMode === "markup" ? "is-active" : ""}
@@ -4094,19 +4125,21 @@ function CostScreen({
                 >
                   <img alt="" src={platform.icon} />
                   <span>{platform.name}</span>
-                  <strong>{platform.fee}%</strong>
+                  <strong>GP {platform.fee.toFixed(2)}%</strong>
                 </button>
               ))}
             </div>
             <label className="fee-input">
-              เปอร์เซ็นต์ที่โดนหัก
+              GP ก่อน VAT (%)
               <input
                 min="0"
                 max="80"
+                step="0.01"
                 onChange={(event) => onDeliveryFee(Number(event.currentTarget.value || 0))}
                 type="number"
                 value={deliveryFee}
               />
+              <small>คิด VAT {GP_VAT_RATE}% เพิ่มจากค่า GP</small>
             </label>
             {deliveryPricingMode === "markup" ? (
               <label className="fee-input">
@@ -4121,7 +4154,9 @@ function CostScreen({
               </label>
             ) : null}
             {deliveryPricingMode === "markup" ? <CostLine label="ส่วนที่บวกจากหน้าร้าน" value={deliveryMarkupAmount} /> : null}
-            <CostLine label="ค่าธรรมเนียมแพลตฟอร์ม" value={platformFeeAmount} />
+            <CostLine label={`ค่า GP ${platformCharges.gpRate.toFixed(2)}%`} value={platformCharges.gpAmount} />
+            <CostLine label={`VAT ${platformCharges.gpVatRate}% ของค่า GP`} value={platformCharges.gpVatAmount} />
+            <CostLine label="รวมค่าธรรมเนียม GP + VAT" value={platformCharges.totalPlatformFee} />
             <CostLine label="รายรับหลังหัก" value={deliveryNetRevenue} />
             <div className="total-line">
               <span>ราคาขายบนเดลิเวอรี่</span>

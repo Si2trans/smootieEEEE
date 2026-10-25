@@ -1,5 +1,5 @@
 import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
-import { calculateSaleRevenue, normalizeGpCalculationBasis } from "./sales";
+import { calculateSaleRevenue, normalizeGpCalculationBasis, normalizeGpVatRate } from "./sales";
 
 const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
@@ -192,7 +192,7 @@ export async function saveIngredient(input: SaveIngredientInput) {
 export async function saveSale(input: SaveSaleInput) {
   const promotionAmount = Number(input.promotionAmount || 0);
   const grossRevenue = Number(input.grossRevenue ?? Number(input.totalRevenue || 0) + promotionAmount);
-  const revenue = calculateSaleRevenue(grossRevenue, promotionAmount, input.channel, input.gpCalculationBasis);
+  const revenue = calculateSaleRevenue(grossRevenue, promotionAmount, input.channel, input.gpCalculationBasis, normalizeGpVatRate(input.gpVatRate));
   const totalCost = Number(input.totalCost || 0);
   return postAction("saveSale", {
     sale: {
@@ -206,6 +206,8 @@ export async function saveSale(input: SaveSaleInput) {
       gp_calculation_basis: revenue.gpCalculationBasis,
       gp_rate: revenue.gpRate,
       gp_amount: revenue.gpAmount,
+      gp_vat_rate: revenue.gpVatRate,
+      gp_vat_amount: revenue.gpVatAmount,
       total_revenue: revenue.netRevenue,
       total_cost: totalCost,
       total_profit: revenue.netRevenue - totalCost,
@@ -475,6 +477,8 @@ function normalizeSales(
         gpCalculationBasis: normalizeGpCalculationBasis(row.gp_calculation_basis || row.gpCalculationBasis),
         gpRate: number(row.gp_rate || row.gpRate),
         gpAmount: number(row.gp_amount || row.gpAmount),
+        gpVatRate: normalizeGpVatRate(row.gp_vat_rate ?? row.gpVatRate),
+        gpVatAmount: number(row.gp_vat_amount ?? row.gpVatAmount),
         totalRevenue,
         totalCost: number(row.total_cost || row.totalCost),
         totalProfit: number(row.total_profit || row.totalProfit),

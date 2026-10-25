@@ -25,7 +25,7 @@ import type {
   UploadImageInput
 } from "./appsScriptApi";
 import type { Category, Recipe } from "../types/app";
-import { calculateSaleRevenue } from "./sales";
+import { calculateSaleRevenue, normalizeGpVatRate } from "./sales";
 
 const DB_NAME = "drink-cost-studio-sync";
 const DB_VERSION = 1;
@@ -196,7 +196,7 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
     if (mutation.action === "saveSale") {
       const sale = mutation.payload as SaveSaleInput;
       const promotionAmount = Number(sale.promotionAmount || 0);
-      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel, sale.gpCalculationBasis);
+      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel, sale.gpCalculationBasis, normalizeGpVatRate(sale.gpVatRate));
       const nextSale = {
         ...sale,
         grossRevenue: revenue.grossRevenue,
@@ -205,6 +205,8 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
         gpCalculationBasis: revenue.gpCalculationBasis,
         gpRate: revenue.gpRate,
         gpAmount: revenue.gpAmount,
+        gpVatRate: revenue.gpVatRate,
+        gpVatAmount: revenue.gpVatAmount,
         totalRevenue: revenue.netRevenue,
         totalProfit: revenue.netRevenue - sale.totalCost,
         createdAt: sale.createdAt || new Date().toISOString()

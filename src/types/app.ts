@@ -94,6 +94,8 @@ export type Sale = {
   gpCalculationBasis?: GpCalculationBasis;
   gpRate: number;
   gpAmount: number;
+  gpVatRate?: number;
+  gpVatAmount?: number;
   totalRevenue: number;
   totalCost: number;
   totalProfit: number;

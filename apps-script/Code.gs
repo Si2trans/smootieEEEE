@@ -165,7 +165,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.sales,
-      headers: ["id", "sale_date", "channel", "payment_method", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at", "gp_calculation_basis"],
+      headers: ["id", "sale_date", "channel", "payment_method", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at", "gp_calculation_basis", "gp_vat_rate", "gp_vat_amount"],
       rows: []
     },
     {
@@ -704,7 +704,12 @@ function saveSale(payload) {
   const gpBase = sale.gp_calculation_basis === "before_promotion" ? sale.gross_revenue : subtotalAfterPromotion;
   sale.gp_rate = isDeliveryChannel(sale.channel) ? 32.1 : 0;
   sale.gp_amount = roundCurrency((gpBase * sale.gp_rate) / 100);
-  sale.total_revenue = roundCurrency(Math.max(0, subtotalAfterPromotion - sale.gp_amount));
+  // Old clients and queued sales omit this field; preserve their original formula.
+  sale.gp_vat_rate = Number(sale.gp_vat_rate || 0);
+  if (!isFinite(sale.gp_vat_rate) || sale.gp_vat_rate < 0 || sale.gp_vat_rate > 100) sale.gp_vat_rate = 0;
+  sale.gp_vat_amount = roundCurrency((sale.gp_amount * sale.gp_vat_rate) / 100);
+  const totalPlatformFee = roundCurrency(sale.gp_amount + sale.gp_vat_amount);
+  sale.total_revenue = roundCurrency(Math.max(0, subtotalAfterPromotion - totalPlatformFee));
   sale.total_cost = Number(sale.total_cost || 0);
   if (!isFinite(sale.total_cost)) sale.total_cost = 0;
   sale.total_cost = Math.max(0, sale.total_cost);
@@ -756,7 +761,7 @@ function normalizePaymentMethod(value) {
 }
 
 function roundCurrency(value) {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  return Math.round((Number(value) + Number.EPSILON * Math.max(1, Math.abs(value))) * 100) / 100;
 }
 
 function deleteSale(saleId) {
