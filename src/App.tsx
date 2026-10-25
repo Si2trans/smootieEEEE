@@ -66,7 +66,8 @@ import {
 import type { SyncState } from "./lib/syncQueue";
 import { getLocalQueueOrders, storeLocalQueueOrders } from "./lib/localQueue";
 import { calculateCost, money, roundPrice } from "./lib/cost";
-import { calculateSaleRevenue } from "./lib/sales";
+import { calculateSaleRevenue, gpRateForChannel, normalizeGpCalculationBasis } from "./lib/sales";
+import type { GpCalculationBasis } from "./types/app";
 import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, QueueAddon, QueueItem, QueueOrder, QueueStatus, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "./types/app";
 
 type Tab = "home" | "recipes" | "cost" | "ingredients" | "orders" | "sales";
@@ -222,6 +223,7 @@ function App() {
   const [saleNote, setSaleNote] = useState("");
   const [salePromotionName, setSalePromotionName] = useState("");
   const [salePromotionAmount, setSalePromotionAmount] = useState(0);
+  const [saleGpCalculationBasis, setSaleGpCalculationBasis] = useState<GpCalculationBasis>("after_promotion");
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [editingSaleCreatedAt, setEditingSaleCreatedAt] = useState("");
   const [editingSaleOriginalDate, setEditingSaleOriginalDate] = useState("");
@@ -325,7 +327,7 @@ function App() {
   const orderTotal = Math.max(0, orderGrossTotal - orderDiscount);
   const saleDraftTotals = calculateSaleDraftTotals(saleItems);
   const saleDiscount = clampPromotionAmount(salePromotionAmount, saleDraftTotals.revenue);
-  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel);
+  const saleRevenue = calculateSaleRevenue(saleDraftTotals.revenue, saleDiscount, saleChannel, saleGpCalculationBasis);
   const saleTotals = {
     ...saleDraftTotals,
     ...saleRevenue,
@@ -792,6 +794,7 @@ function App() {
     setSalePaymentMethod("");
     setSalePromotionName("");
     setSalePromotionAmount(0);
+    setSaleGpCalculationBasis("after_promotion");
     setEditingSaleId(null);
     setEditingSaleCreatedAt("");
     setEditingSaleOriginalDate("");
@@ -819,6 +822,7 @@ function App() {
     setSaleNote(sale.note || "");
     setSalePromotionName(sale.promotionName || "");
     setSalePromotionAmount(sale.promotionAmount || 0);
+    setSaleGpCalculationBasis(normalizeGpCalculationBasis(sale.gpCalculationBasis));
     setEditingSaleId(sale.id);
     setEditingSaleCreatedAt(sale.createdAt);
     setEditingSaleOriginalDate(sale.saleDate);
@@ -898,6 +902,7 @@ function App() {
         grossRevenue: saleTotals.grossRevenue,
         promotionName: saleTotals.promotionAmount > 0 ? salePromotionName.trim() : "",
         promotionAmount: saleTotals.promotionAmount,
+        gpCalculationBasis: saleTotals.gpCalculationBasis,
         gpRate: saleTotals.gpRate,
         gpAmount: saleTotals.gpAmount,
         totalRevenue: saleTotals.revenue,
@@ -1436,6 +1441,7 @@ function App() {
                   paymentMethod={salePaymentMethod}
                   promotionAmount={salePromotionAmount}
                   promotionName={salePromotionName}
+                  gpCalculationBasis={saleGpCalculationBasis}
                   recipes={recipes}
                   sales={sales}
                   saving={saving}
@@ -1456,6 +1462,7 @@ function App() {
                   onPaymentMethod={setSalePaymentMethod}
                   onPromotionAmount={setSalePromotionAmount}
                   onPromotionName={setSalePromotionName}
+                  onGpCalculationBasis={setSaleGpCalculationBasis}
                   onRemoveItem={removeSaleItem}
                   onSearch={setSaleSearch}
                   onSubmit={submitSale}
@@ -2809,13 +2816,17 @@ function PromotionEditor({
   grossTotal,
   name,
   onAmount,
-  onName
+  onName,
+  gpCalculationBasis,
+  onGpCalculationBasis
 }: {
   amount: number;
   grossTotal: number;
   name: string;
   onAmount: (value: number) => void;
   onName: (value: string) => void;
+  gpCalculationBasis?: GpCalculationBasis;
+  onGpCalculationBasis?: (value: GpCalculationBasis) => void;
 }) {
   const active = Boolean(name || amount);
   if (!active) {
@@ -2857,6 +2868,16 @@ function PromotionEditor({
             value={amount}
           />
         </label>
+        {onGpCalculationBasis ? (
+          <label className="promotion-gp-field">
+            วิธีคิด GP
+            <select onChange={(event) => onGpCalculationBasis(normalizeGpCalculationBasis(event.currentTarget.value))} value={gpCalculationBasis || "after_promotion"}>
+              <option value="before_promotion">คิด GP ก่อนหักโปรโมชั่น</option>
+              <option value="after_promotion">คิด GP หลังหักโปรโมชั่น</option>
+            </select>
+            <small>{gpCalculationBasis === "before_promotion" ? "ใช้ยอดก่อนหักส่วนลดเป็นฐานคำนวณ GP" : "ใช้ยอดหลังหักส่วนลดเป็นฐานคำนวณ GP"}</small>
+          </label>
+        ) : null}
       </div>
       {amount > grossTotal && grossTotal > 0 ? <small className="promotion-warning">ส่วนลดสูงกว่ายอดสินค้า ระบบจะใช้ไม่เกิน {money(grossTotal)} บาท</small> : null}
     </section>
@@ -2877,6 +2898,7 @@ function SalesScreen({
   paymentMethod,
   promotionAmount,
   promotionName,
+  gpCalculationBasis,
   recipes,
   sales,
   saving,
@@ -2897,6 +2919,7 @@ function SalesScreen({
   onPaymentMethod,
   onPromotionAmount,
   onPromotionName,
+  onGpCalculationBasis,
   onRemoveItem,
   onSearch,
   onSubmit,
@@ -2915,6 +2938,7 @@ function SalesScreen({
   paymentMethod: PaymentMethodSelection;
   promotionAmount: number;
   promotionName: string;
+  gpCalculationBasis: GpCalculationBasis;
   recipes: Recipe[];
   sales: Sale[];
   saving: boolean;
@@ -2935,6 +2959,7 @@ function SalesScreen({
   onPaymentMethod: (value: PaymentMethodSelection) => void;
   onPromotionAmount: (value: number) => void;
   onPromotionName: (value: string) => void;
+  onGpCalculationBasis: (value: GpCalculationBasis) => void;
   onRemoveItem: (itemId: string) => void;
   onSearch: (query: string) => void;
   onSubmit: () => void;
@@ -3078,6 +3103,8 @@ function SalesScreen({
         name={promotionName}
         onAmount={onPromotionAmount}
         onName={onPromotionName}
+        gpCalculationBasis={gpCalculationBasis}
+        onGpCalculationBasis={gpRateForChannel(channel) > 0 ? onGpCalculationBasis : undefined}
       />
 
       <label className="order-note">
@@ -3105,13 +3132,13 @@ function SalesScreen({
             <strong>-{money(totals.promotionAmount)} บาท</strong>
           </div>
         ) : null}
-        {totals.gpAmount > 0 ? (
+        {totals.gpRate > 0 ? (
           <div>
-            <span>{totals.promotionAmount > 0 ? "ยอดหลังโปรโมชั่น" : "ยอดก่อนหัก GP"}</span>
-            <strong>{money(totals.subtotalAfterPromotion)} บาท</strong>
+            <span>ฐานคิด GP ({gpCalculationBasis === "before_promotion" ? "ก่อนหักโปรโมชั่น" : "หลังหักโปรโมชั่น"})</span>
+            <strong>{money(totals.gpBase)} บาท</strong>
           </div>
         ) : null}
-        {totals.gpAmount > 0 ? (
+        {totals.gpRate > 0 ? (
           <div className="is-discount">
             <span>ค่า GP {totals.gpRate.toFixed(2)}%</span>
             <strong>-{money(totals.gpAmount)} บาท</strong>
@@ -3269,7 +3296,7 @@ function SaleHistoryEntry({ onDelete, onEdit, sale }: { onDelete: (sale: Sale) =
         ) : null}
         {sale.gpAmount > 0 ? (
           <div className="sale-history-promotion">
-            <span>ค่า GP {sale.gpRate.toFixed(2)}%</span>
+            <span>ค่า GP {sale.gpRate.toFixed(2)}%{sale.promotionAmount > 0 ? ` (${sale.gpCalculationBasis === "before_promotion" ? "ก่อนหักโปรโมชั่น" : "หลังหักโปรโมชั่น"})` : ""}</span>
             <strong>-{money(sale.gpAmount)} บาท</strong>
           </div>
         ) : null}

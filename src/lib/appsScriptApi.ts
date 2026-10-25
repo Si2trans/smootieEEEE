@@ -1,5 +1,5 @@
 import type { Category, CategoryId, DailyClosing, Ingredient, MonthlyArchive, MonthlyArchiveDay, PaymentMethod, Recipe, RecipeItem, Sale, SaleItem, SaleItemKind, Unit } from "../types/app";
-import { calculateSaleRevenue } from "./sales";
+import { calculateSaleRevenue, normalizeGpCalculationBasis } from "./sales";
 
 const DEFAULT_APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxyh2P5FyC4j7GTPMm5KtG1rA3xMESX3HCYCIOlh5ZkEAQvSLpNzMGBykonkFMrv5fCBQ/exec";
@@ -192,7 +192,7 @@ export async function saveIngredient(input: SaveIngredientInput) {
 export async function saveSale(input: SaveSaleInput) {
   const promotionAmount = Number(input.promotionAmount || 0);
   const grossRevenue = Number(input.grossRevenue ?? Number(input.totalRevenue || 0) + promotionAmount);
-  const revenue = calculateSaleRevenue(grossRevenue, promotionAmount, input.channel);
+  const revenue = calculateSaleRevenue(grossRevenue, promotionAmount, input.channel, input.gpCalculationBasis);
   const totalCost = Number(input.totalCost || 0);
   return postAction("saveSale", {
     sale: {
@@ -203,6 +203,7 @@ export async function saveSale(input: SaveSaleInput) {
       gross_revenue: grossRevenue,
       promotion_name: input.promotionName || "",
       promotion_amount: revenue.promotionAmount,
+      gp_calculation_basis: revenue.gpCalculationBasis,
       gp_rate: revenue.gpRate,
       gp_amount: revenue.gpAmount,
       total_revenue: revenue.netRevenue,
@@ -471,6 +472,7 @@ function normalizeSales(
         grossRevenue: number(row.gross_revenue || row.grossRevenue, totalRevenue + promotionAmount),
         promotionName: text(row.promotion_name || row.promotionName),
         promotionAmount,
+        gpCalculationBasis: normalizeGpCalculationBasis(row.gp_calculation_basis || row.gpCalculationBasis),
         gpRate: number(row.gp_rate || row.gpRate),
         gpAmount: number(row.gp_amount || row.gpAmount),
         totalRevenue,

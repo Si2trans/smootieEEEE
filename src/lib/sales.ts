@@ -1,3 +1,5 @@
+import type { GpCalculationBasis } from "../types/app";
+
 export const DELIVERY_GP_RATE = 32.1;
 
 const deliveryChannels = new Set(["LINE MAN", "Grab", "ShopeeFood"]);
@@ -6,14 +8,20 @@ export function gpRateForChannel(channel: string) {
   return deliveryChannels.has(channel) ? DELIVERY_GP_RATE : 0;
 }
 
-export function calculateSaleRevenue(grossRevenue: number, promotionAmount: number, channel: string) {
+export function normalizeGpCalculationBasis(value: unknown): GpCalculationBasis {
+  return value === "before_promotion" ? "before_promotion" : "after_promotion";
+}
+
+export function calculateSaleRevenue(grossRevenue: number, promotionAmount: number, channel: string, calculationBasis?: GpCalculationBasis) {
   const gross = safeNonNegative(grossRevenue);
   const promotion = Math.min(safeNonNegative(promotionAmount), gross);
   const subtotalAfterPromotion = roundCurrency(gross - promotion);
   const gpRate = gpRateForChannel(channel);
-  const gpAmount = roundCurrency((subtotalAfterPromotion * gpRate) / 100);
+  const gpCalculationBasis = normalizeGpCalculationBasis(calculationBasis);
+  const gpBase = gpCalculationBasis === "before_promotion" ? gross : subtotalAfterPromotion;
+  const gpAmount = roundCurrency((gpBase * gpRate) / 100);
   const netRevenue = roundCurrency(Math.max(0, subtotalAfterPromotion - gpAmount));
-  return { grossRevenue: gross, promotionAmount: promotion, subtotalAfterPromotion, gpRate, gpAmount, netRevenue };
+  return { grossRevenue: gross, promotionAmount: promotion, subtotalAfterPromotion, gpCalculationBasis, gpBase, gpRate, gpAmount, netRevenue };
 }
 
 export function roundCurrency(value: number) {

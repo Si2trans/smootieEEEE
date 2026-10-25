@@ -196,12 +196,13 @@ export async function applyQueuedMutations(data: AppData): Promise<AppData> {
     if (mutation.action === "saveSale") {
       const sale = mutation.payload as SaveSaleInput;
       const promotionAmount = Number(sale.promotionAmount || 0);
-      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel);
+      const revenue = calculateSaleRevenue(Number(sale.grossRevenue ?? sale.totalRevenue + promotionAmount), promotionAmount, sale.channel, sale.gpCalculationBasis);
       const nextSale = {
         ...sale,
         grossRevenue: revenue.grossRevenue,
         promotionName: sale.promotionName || "",
         promotionAmount: revenue.promotionAmount,
+        gpCalculationBasis: revenue.gpCalculationBasis,
         gpRate: revenue.gpRate,
         gpAmount: revenue.gpAmount,
         totalRevenue: revenue.netRevenue,

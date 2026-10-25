@@ -81,6 +81,8 @@ export type SaleItem = {
   note?: string;
 };
 
+export type GpCalculationBasis = "before_promotion" | "after_promotion";
+
 export type Sale = {
   id: string;
   saleDate: string;
@@ -89,6 +91,7 @@ export type Sale = {
   grossRevenue: number;
   promotionName?: string;
   promotionAmount: number;
+  gpCalculationBasis?: GpCalculationBasis;
   gpRate: number;
   gpAmount: number;
   totalRevenue: number;

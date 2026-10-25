@@ -165,7 +165,7 @@ function setupSpreadsheet() {
     },
     {
       name: SHEETS.sales,
-      headers: ["id", "sale_date", "channel", "payment_method", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at"],
+      headers: ["id", "sale_date", "channel", "payment_method", "gross_revenue", "promotion_name", "promotion_amount", "gp_rate", "gp_amount", "total_revenue", "total_cost", "total_profit", "note", "created_at", "updated_at", "gp_calculation_basis"],
       rows: []
     },
     {
@@ -700,8 +700,10 @@ function saveSale(payload) {
   sale.gross_revenue = Math.max(0, sale.gross_revenue);
   sale.promotion_amount = Math.min(sale.promotion_amount, sale.gross_revenue);
   const subtotalAfterPromotion = roundCurrency(sale.gross_revenue - sale.promotion_amount);
+  sale.gp_calculation_basis = sale.gp_calculation_basis === "before_promotion" ? "before_promotion" : "after_promotion";
+  const gpBase = sale.gp_calculation_basis === "before_promotion" ? sale.gross_revenue : subtotalAfterPromotion;
   sale.gp_rate = isDeliveryChannel(sale.channel) ? 32.1 : 0;
-  sale.gp_amount = roundCurrency((subtotalAfterPromotion * sale.gp_rate) / 100);
+  sale.gp_amount = roundCurrency((gpBase * sale.gp_rate) / 100);
   sale.total_revenue = roundCurrency(Math.max(0, subtotalAfterPromotion - sale.gp_amount));
   sale.total_cost = Number(sale.total_cost || 0);
   if (!isFinite(sale.total_cost)) sale.total_cost = 0;

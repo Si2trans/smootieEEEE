@@ -2933,13 +2933,29 @@ p {
   font-weight: 800;
 }
 
-.promotion-fields input {
+.promotion-fields input,
+.promotion-fields select {
   width: 100%;
   min-height: 38px;
   border: 1px solid #dfe6da;
   border-radius: 9px;
   padding: 7px 9px;
   background: #fff;
+}
+
+.promotion-fields .promotion-gp-field {
+  grid-column: 1 / -1;
+}
+
+.promotion-gp-field select {
+  min-width: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.promotion-gp-field small {
+  font-weight: 400;
 }
 
 .promotion-warning {
